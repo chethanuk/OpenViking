@@ -205,6 +205,9 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
 addopts = "-v --cov=openviking --cov-report=term-missing"
+markers = [
+    "integration: tests that call real external APIs (require env vars)",
+]
 
 [tool.ruff]
 line-length = 100
