@@ -68,8 +68,16 @@ class EmbeddingMsgConverter:
             resolved_level = int(resolved_level.value)
         context_data["level"] = int(resolved_level)
 
+        media_uri = None
+        media_mime_type = None
+        if getattr(context.vectorize, "media", None) is not None:
+            media_uri = context.vectorize.media.uri
+            media_mime_type = context.vectorize.media.mime_type
+
         embedding_msg = EmbeddingMsg(
             message=vectorization_text,
             context_data=context_data,
+            media_uri=media_uri,
+            media_mime_type=media_mime_type,
         )
         return embedding_msg
