@@ -5,7 +5,8 @@
 
 import pytest
 
-from openviking.core.context import Context
+from openviking.core.context import Context, ModalContent, Vectorize
+from openviking.storage.queuefs.embedding_msg import EmbeddingMsg
 from openviking.storage.queuefs.embedding_msg_converter import EmbeddingMsgConverter
 from openviking_cli.session.user_id import UserIdentifier
 
@@ -42,9 +43,6 @@ def test_embedding_msg_converter_backfills_account_and_owner_space(uri, expected
     assert msg.context_data["owner_space"] == expected_space(user)
 
 
-from openviking.storage.queuefs.embedding_msg import EmbeddingMsg
-
-
 def test_embedding_msg_media_fields_default_none():
     msg = EmbeddingMsg(message="hello", context_data={"uri": "viking://x"})
     assert msg.media_uri is None
@@ -70,10 +68,6 @@ def test_embedding_msg_legacy_message_missing_media_fields():
     msg = EmbeddingMsg.from_dict(old_payload)
     assert msg.media_uri is None
     assert msg.media_mime_type is None
-
-
-from openviking.core.context import Context, ModalContent, Vectorize
-from openviking.storage.queuefs.embedding_msg_converter import EmbeddingMsgConverter
 
 
 def test_converter_passes_media_uri_when_vectorize_has_media():

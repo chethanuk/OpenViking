@@ -102,7 +102,8 @@ OpenViking 使用 JSON 配置文件（`ov.conf`）进行设置。配置文件支
       "provider": "gemini",
       "api_key": "your-google-api-key",
       "model": "gemini-embedding-2-preview",
-      "dimension": 3072
+      "dimension": 3072,
+      "task_type": "RETRIEVAL_DOCUMENT"
     }
   }
 }
@@ -214,7 +215,8 @@ OpenViking 使用 JSON 配置文件（`ov.conf`）进行设置。配置文件支
       "provider": "gemini",
       "api_key": "your-google-api-key",
       "model": "gemini-embedding-2-preview",
-      "dimension": 3072
+      "dimension": 3072,
+      "task_type": "RETRIEVAL_DOCUMENT"
     }
   }
 }

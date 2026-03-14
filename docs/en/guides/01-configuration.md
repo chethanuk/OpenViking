@@ -97,7 +97,8 @@ Create `~/.openviking/ov.conf` in your project directory:
       "provider": "gemini",
       "api_key": "your-google-api-key",
       "model": "gemini-embedding-2-preview",
-      "dimension": 3072
+      "dimension": 3072,
+      "task_type": "RETRIEVAL_DOCUMENT"
     }
   }
 }
@@ -210,7 +211,8 @@ Get your API key at https://jina.ai
       "provider": "gemini",
       "api_key": "your-google-api-key",
       "model": "gemini-embedding-2-preview",
-      "dimension": 3072
+      "dimension": 3072,
+      "task_type": "RETRIEVAL_DOCUMENT"
     }
   }
 }
