@@ -160,6 +160,27 @@ class TestGeminiDenseEmbedderEmbedMultimodal:
         assert any("fallback" in r.message.lower() for r in caplog.records)
 
 
+class TestGeminiDenseEmbedderTransientError:
+    @patch("openviking.models.embedder.gemini_embedders.genai.Client")
+    def test_embed_multimodal_raises_on_transient_error(self, mock_client_class):
+        """429/5xx errors in multimodal embed must raise RuntimeError (caller retries)."""
+        from google.genai.errors import APIError
+        from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
+
+        mock_client = mock_client_class.return_value
+        mock_response = MagicMock()
+        mock_response.status_code = 429
+        mock_client.models.embed_content.side_effect = APIError(429, {}, response=mock_response)
+
+        embedder = GeminiDenseEmbedder("gemini-embedding-2-preview", api_key="key", dimension=1)
+        v = Vectorize(
+            text="doc",
+            media=ModalContent(mime_type="image/jpeg", uri="img.jpg", data=b"bytes"),
+        )
+        with pytest.raises(RuntimeError, match="transient"):
+            embedder.embed_multimodal(v)
+
+
 class TestGeminiDenseEmbedderBatch:
     @patch("openviking.models.embedder.gemini_embedders.genai.Client")
     def test_embed_batch_empty(self, mock_client_class):

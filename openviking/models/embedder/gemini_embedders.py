@@ -96,8 +96,8 @@ class GeminiDenseEmbedder(DenseEmbedderBase):
             if e.code in (429, 502, 503, 504):
                 raise RuntimeError(f"Gemini transient error (code={e.code}), caller should retry") from e
             logger.warning(
-                f"Gemini multimodal embed failed (code={e.code}) for {media.uri!r}, "
-                "fallback to text-only embedding"
+                f"Gemini multimodal embed failed (code={e.code}) for {media.uri!r} — "
+                f"falling back to text. [multimodal_fallback=True]"
             )
             return self.embed(vectorize.text)
 
