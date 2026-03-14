@@ -23,6 +23,18 @@ def _make_mock_result(values_list):
     return result
 
 
+def test_supported_mimes_includes_video_and_pdf():
+    from openviking.models.embedder.gemini_embedders import _SUPPORTED_MULTIMODAL_MIMES
+    assert "video/mp4" in _SUPPORTED_MULTIMODAL_MIMES
+    assert "application/pdf" in _SUPPORTED_MULTIMODAL_MIMES
+    assert "image/jpeg" in _SUPPORTED_MULTIMODAL_MIMES
+
+
+def test_input_token_limit_constant():
+    from openviking.models.embedder.gemini_embedders import _GEMINI_INPUT_TOKEN_LIMIT
+    assert _GEMINI_INPUT_TOKEN_LIMIT == 8192
+
+
 class TestGeminiDenseEmbedderInit:
     def test_requires_api_key(self):
         from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder

@@ -48,18 +48,25 @@ def embedder():
     e = GeminiDenseEmbedder(
         "gemini-embedding-2-preview",
         api_key=_API_KEY,
-        dimension=768,
+        # dimension defaults to 3072 — test the actual default
         task_type="RETRIEVAL_DOCUMENT",
     )
     yield e
     e.close()
 
 
+def test_default_dimension_is_3072(embedder):
+    """Default output dimension must match model's native 3072."""
+    assert embedder.get_dimension() == 3072
+    result = embedder.embed("hello")
+    assert len(result.dense_vector) == 3072
+
+
 class TestGeminiE2ETextEmbedding:
     def test_embed_text_returns_correct_dimension(self, embedder):
         result = embedder.embed("OpenViking is a knowledge management system")
         assert result.dense_vector is not None
-        assert len(result.dense_vector) == 768
+        assert len(result.dense_vector) == 3072
 
     def test_embed_text_vector_is_normalized(self, embedder):
         result = embedder.embed("test normalization")
@@ -93,7 +100,7 @@ class TestGeminiE2EMultimodalEmbedding:
         )
         result = embedder.embed_multimodal(v)
         assert result.dense_vector is not None
-        assert len(result.dense_vector) == 768
+        assert len(result.dense_vector) == 3072
 
     def test_multimodal_fallback_on_no_media(self, embedder):
         v = Vectorize(text="just text, no image")
@@ -108,13 +115,11 @@ class TestGeminiE2ETaskType:
         doc_embedder = GeminiDenseEmbedder(
             "gemini-embedding-2-preview",
             api_key=_API_KEY,
-            dimension=768,
             task_type="RETRIEVAL_DOCUMENT",
         )
         query_embedder = GeminiDenseEmbedder(
             "gemini-embedding-2-preview",
             api_key=_API_KEY,
-            dimension=768,
             task_type="RETRIEVAL_QUERY",
         )
         text = "machine learning algorithms"

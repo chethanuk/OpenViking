@@ -19,15 +19,41 @@ from openviking.models.embedder.base import (
 logger = logging.getLogger("gemini_embedders")
 
 _SUPPORTED_MULTIMODAL_MIMES = frozenset({
-    "image/jpeg", "image/png", "image/gif", "image/webp",
-    "audio/mpeg", "audio/mp3", "audio/wav",
+    # Images
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    # Audio
+    "audio/mpeg",
+    "audio/mp3",
+    "audio/wav",
+    "audio/ogg",
+    "audio/flac",
+    # Video
+    "video/mp4",
+    "video/mpeg",
+    "video/mov",
+    "video/avi",
+    "video/webm",
+    "video/wmv",
+    "video/3gpp",
+    # Documents
+    "application/pdf",
 })
 
 _TEXT_BATCH_SIZE = 100
 
+# Maximum input tokens per Gemini embedding request (model hard limit).
+_GEMINI_INPUT_TOKEN_LIMIT = 8192
+
 
 class GeminiDenseEmbedder(DenseEmbedderBase):
-    """Dense embedder backed by Google's Gemini Embedding 2 model."""
+    """Dense embedder backed by Google's Gemini Embedding 2 model.
+
+    Input token limit: 8,192 tokens per request.
+    Output dimension: 128–3072 (recommended: 768, 1536, 3072; default: 3072).
+    """
 
     KNOWN_DIMENSIONS: Dict[str, int] = {
         "gemini-embedding-2-preview": 3072,
