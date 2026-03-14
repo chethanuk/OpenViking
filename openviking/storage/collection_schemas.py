@@ -191,11 +191,43 @@ class TextEmbeddingHandler(DequeueHandlerBase):
 
             # Generate embedding vector(s)
             if self._embedder:
-                # embed() is a blocking HTTP call; offload to thread pool to avoid
-                # blocking the event loop and allow real concurrency.
-                result: EmbedResult = await asyncio.to_thread(
-                    self._embedder.embed, embedding_msg.message
-                )
+                # Multimodal path: read bytes from viking_fs and call embed_multimodal()
+                if (
+                    embedding_msg.media_uri
+                    and embedding_msg.media_mime_type
+                    and getattr(self._embedder, "supports_multimodal", False)
+                ):
+                    try:
+                        from openviking.core.context import ModalContent, Vectorize
+                        from openviking.storage.viking_fs import get_viking_fs
+
+                        viking_fs = get_viking_fs()
+                        raw_bytes = await viking_fs.read_file_bytes(embedding_msg.media_uri)
+                        vectorize = Vectorize(
+                            text=embedding_msg.message,
+                            media=ModalContent(
+                                mime_type=embedding_msg.media_mime_type,
+                                uri=embedding_msg.media_uri,
+                                data=raw_bytes,
+                            ),
+                        )
+                        result: EmbedResult = await asyncio.to_thread(
+                            self._embedder.embed_multimodal, vectorize
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"Multimodal embed failed for {embedding_msg.media_uri!r}: {e}, "
+                            "falling back to text embedding"
+                        )
+                        result: EmbedResult = await asyncio.to_thread(
+                            self._embedder.embed, embedding_msg.message
+                        )
+                else:
+                    # embed() is a blocking HTTP call; offload to thread pool to avoid
+                    # blocking the event loop and allow real concurrency.
+                    result: EmbedResult = await asyncio.to_thread(
+                        self._embedder.embed, embedding_msg.message
+                    )
 
                 # Add dense vector
                 if result.dense_vector:
