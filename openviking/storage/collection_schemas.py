@@ -197,31 +197,48 @@ class TextEmbeddingHandler(DequeueHandlerBase):
                     and embedding_msg.media_mime_type
                     and getattr(self._embedder, "supports_multimodal", False)
                 ):
-                    try:
-                        from openviking.core.context import ModalContent, Vectorize
-                        from openviking.storage.viking_fs import get_viking_fs
-
-                        viking_fs = get_viking_fs()
-                        raw_bytes = await viking_fs.read_file_bytes(embedding_msg.media_uri)
-                        vectorize = Vectorize(
-                            text=embedding_msg.message,
-                            media=ModalContent(
-                                mime_type=embedding_msg.media_mime_type,
-                                uri=embedding_msg.media_uri,
-                                data=raw_bytes,
-                            ),
-                        )
-                        result: EmbedResult = await asyncio.to_thread(
-                            self._embedder.embed_multimodal, vectorize
-                        )
-                    except Exception as e:
+                    # Security: validate media_uri matches the record's own URI to prevent
+                    # forged queue messages from reading arbitrary files.
+                    expected_uri = embedding_msg.context_data.get("uri", "")
+                    if embedding_msg.media_uri != expected_uri:
                         logger.warning(
-                            f"Multimodal embed failed for {embedding_msg.media_uri!r}: {e}, "
-                            "falling back to text embedding"
+                            f"media_uri {embedding_msg.media_uri!r} does not match context uri "
+                            f"{expected_uri!r}, falling back to text embedding"
                         )
                         result: EmbedResult = await asyncio.to_thread(
                             self._embedder.embed, embedding_msg.message
                         )
+                    else:
+                        # TODO(security): reconstruct a tenant-scoped RequestContext from
+                        # context_data["account_id"] to prevent ROOT-context file reads.
+                        # Blocked on UserIdentifier requiring user_id/agent_id fields that
+                        # are not currently propagated through EmbeddingMsg.context_data.
+                        try:
+                            from openviking.core.context import ModalContent, Vectorize
+                            from openviking.storage.viking_fs import get_viking_fs
+
+                            viking_fs = get_viking_fs()
+                            # read_file_bytes is async — await directly (not asyncio.to_thread)
+                            raw_bytes = await viking_fs.read_file_bytes(embedding_msg.media_uri, ctx=None)
+                            vectorize = Vectorize(
+                                text=embedding_msg.message,
+                                media=ModalContent(
+                                    mime_type=embedding_msg.media_mime_type,
+                                    uri=embedding_msg.media_uri,
+                                    data=raw_bytes,
+                                ),
+                            )
+                            result: EmbedResult = await asyncio.to_thread(
+                                self._embedder.embed_multimodal, vectorize
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                f"Multimodal embed failed for {embedding_msg.media_uri!r}: {e}, "
+                                "falling back to text embedding"
+                            )
+                            result: EmbedResult = await asyncio.to_thread(
+                                self._embedder.embed, embedding_msg.message
+                            )
                 else:
                     # embed() is a blocking HTTP call; offload to thread pool to avoid
                     # blocking the event loop and allow real concurrency.

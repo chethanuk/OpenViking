@@ -215,3 +215,36 @@ async def test_handler_falls_back_to_text_when_read_file_fails(monkeypatch):
 
     assert embedder.embed_calls == 1
     assert embedder.embed_multimodal_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_handler_rejects_media_uri_not_matching_context_uri(monkeypatch):
+    """media_uri that differs from context_data['uri'] must fall back to text embed (security)."""
+    embedder = _MultimodalEmbedder()
+    monkeypatch.setattr(
+        "openviking_cli.utils.config.get_openviking_config",
+        lambda: _DummyMultimodalConfig(embedder),
+    )
+
+    class _FakeVikingDB:
+        is_closing = False
+
+        async def upsert(self, data):
+            pass
+
+    # media_uri points to a DIFFERENT file than context_data["uri"]
+    msg = EmbeddingMsg(
+        message="caption",
+        context_data={"id": "x", "uri": "viking://owner/legit.png", "account_id": "default", "abstract": "a"},
+        media_uri="viking://attacker/secret.png",  # DIFFERENT from uri
+        media_mime_type="image/png",
+    )
+    payload = {"data": json.dumps(msg.to_dict())}
+
+    handler = TextEmbeddingHandler(_FakeVikingDB())
+    handler.set_callbacks(on_success=lambda: None, on_error=lambda *_: None)
+    await handler.on_dequeue(payload)
+
+    # Must fall back to text — NOT call embed_multimodal
+    assert embedder.embed_multimodal_calls == 0
+    assert embedder.embed_calls == 1
