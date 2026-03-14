@@ -16,11 +16,11 @@ class EmbeddingModelConfig(BaseModel):
     input: str = Field(default="multimodal", description="Input type: 'text' or 'multimodal'")
     provider: Optional[str] = Field(
         default="volcengine",
-        description="Provider type: 'openai', 'volcengine', 'vikingdb', 'jina'",
+        description="Provider type: 'openai', 'volcengine', 'vikingdb', 'jina', 'gemini'",
     )
     backend: Optional[str] = Field(
         default="volcengine",
-        description="Backend type (Deprecated, use 'provider' instead): 'openai', 'volcengine', 'vikingdb'",
+        description="Backend type (Deprecated, use 'provider' instead): 'openai', 'volcengine', 'vikingdb', 'gemini'",
     )
     version: Optional[str] = Field(default=None, description="Model version")
     ak: Optional[str] = Field(default=None, description="Access Key ID for VikingDB API")
@@ -98,7 +98,7 @@ class EmbeddingModelConfig(BaseModel):
 
 class EmbeddingConfig(BaseModel):
     """
-    Embedding configuration, supports OpenAI or VolcEngine compatible APIs.
+    Embedding configuration, supports OpenAI, VolcEngine, VikingDB, Jina, or Gemini APIs.
 
     Structure:
     - dense: Configuration for dense embedder
@@ -131,7 +131,7 @@ class EmbeddingConfig(BaseModel):
         """Factory method to create embedder instance based on provider and type.
 
         Args:
-            provider: Provider type ('openai', 'volcengine', 'vikingdb')
+            provider: Provider type ('openai', 'volcengine', 'vikingdb', 'gemini')
             embedder_type: Embedder type ('dense', 'sparse', 'hybrid')
             config: EmbeddingModelConfig instance
 

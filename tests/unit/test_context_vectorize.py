@@ -1,7 +1,6 @@
 # Copyright (c) 2026 Beijing Volcano Engine Technology Co., Ltd.
 # SPDX-License-Identifier: Apache-2.0
 """Tests for ModalContent and Vectorize media extension."""
-import pytest
 from openviking.core.context import ModalContent, Vectorize
 
 
