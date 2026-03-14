@@ -1,0 +1,17 @@
+{
+  "_comment": [
+    "Gemini Embedding 2 alternative configuration for OpenViking.",
+    "Set GEMINI_API_KEY in your environment before starting the server.",
+    "dimension MUST be 3072 — this is the native output size of gemini-embedding-2-preview.",
+    "Reducing dimension requires explicit truncation; the server will reject other values."
+  ],
+  "embedding": {
+    "dense": {
+      "model": "gemini-embedding-2-preview",
+      "api_key": "${GEMINI_API_KEY}",
+      "dimension": 3072,
+      "provider": "gemini",
+      "task_type": "RETRIEVAL_DOCUMENT"
+    }
+  }
+}
