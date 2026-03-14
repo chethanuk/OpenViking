@@ -19,6 +19,28 @@ from openviking_cli.utils import VikingURI, get_logger
 
 logger = get_logger(__name__)
 
+_IMAGE_MIME_MAP = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+    ".svg": "image/svg+xml",
+}
+
+# MIME types natively supported by Gemini embedding for multimodal.
+# Must stay in sync with _SUPPORTED_MULTIMODAL_MIMES in gemini_embedders.py.
+_GEMINI_SUPPORTED_IMAGE_MIMES = frozenset({
+    "image/jpeg", "image/png", "image/gif", "image/webp",
+})
+
+
+def _infer_image_mime(file_name: str) -> Optional[str]:
+    """Return MIME type for image file by extension, or None if unknown."""
+    ext = os.path.splitext(file_name.lower())[1]
+    return _IMAGE_MIME_MAP.get(ext)
+
 
 def _owner_space_for_uri(uri: str, ctx: RequestContext) -> str:
     """Derive owner_space from a URI."""
@@ -235,8 +257,40 @@ async def vectorize_file(
                 else:
                     logger.warning(f"No summary available for {file_path}, skipping vectorization")
                     return
+        elif content_type == ResourceContentType.IMAGE:
+            try:
+                from openviking_cli.utils.config import get_openviking_config
+                ov_config = get_openviking_config()
+                embedding_cfg = getattr(ov_config, "embedding", None)
+                dense_cfg = getattr(embedding_cfg, "dense", None) if embedding_cfg else None
+                provider = getattr(dense_cfg, "provider", "").lower() if dense_cfg else ""
+                is_multimodal_provider = provider == "gemini"
+            except Exception:
+                is_multimodal_provider = False
+
+            if is_multimodal_provider:
+                mime_type = _infer_image_mime(file_name)
+                if mime_type and mime_type in _GEMINI_SUPPORTED_IMAGE_MIMES:
+                    from openviking.core.context import ModalContent
+                    fallback_text = summary or os.path.basename(file_path)
+                    context.set_vectorize(
+                        Vectorize(
+                            text=fallback_text,
+                            media=ModalContent(uri=file_path, mime_type=mime_type),
+                        )
+                    )
+                elif summary:
+                    context.set_vectorize(Vectorize(text=summary))
+                else:
+                    logger.debug(f"Skipping image {file_path}: unsupported format and no summary")
+                    return
+            elif summary:
+                context.set_vectorize(Vectorize(text=summary))
+            else:
+                logger.debug(f"Skipping image {file_path}: no multimodal support and no summary")
+                return
         elif summary:
-            # For non-text files, use summary
+            # For other non-text files (VIDEO, AUDIO), use summary
             context.set_vectorize(Vectorize(text=summary))
         else:
             logger.debug(f"Skipping file {file_path} (no text content or summary)")
