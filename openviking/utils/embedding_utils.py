@@ -29,11 +29,9 @@ _IMAGE_MIME_MAP = {
     ".svg": "image/svg+xml",
 }
 
-# MIME types natively supported by Gemini embedding for multimodal.
-# Must stay in sync with _SUPPORTED_MULTIMODAL_MIMES in gemini_embedders.py.
-_GEMINI_SUPPORTED_IMAGE_MIMES = frozenset({
-    "image/jpeg", "image/png", "image/gif", "image/webp",
-})
+# Use the embedder's allowlist as the single source of truth for image MIME types.
+from openviking.models.embedder.gemini_embedders import _SUPPORTED_MULTIMODAL_MIMES as _GEMINI_MULTIMODAL_MIMES
+_GEMINI_SUPPORTED_IMAGE_MIMES = frozenset(m for m in _GEMINI_MULTIMODAL_MIMES if m.startswith("image/"))
 
 
 def _infer_image_mime(file_name: str) -> Optional[str]:
