@@ -95,3 +95,18 @@ def test_converter_media_fields_none_for_text_only():
 
     assert msg.media_uri is None
     assert msg.media_mime_type is None
+
+
+def test_converter_allows_media_even_with_empty_text():
+    """If media is present but text is empty, use URI as fallback — don't drop the message."""
+    context = Context(uri="viking://agent/resources/img.png", abstract="")
+    mc = ModalContent(mime_type="image/png", uri="viking://agent/resources/img.png")
+    context.set_vectorize(Vectorize(text="", media=mc))
+
+    msg = EmbeddingMsgConverter.from_context(context)
+
+    # Should NOT be None — media-only messages must pass through
+    assert msg is not None
+    assert msg.media_uri == "viking://agent/resources/img.png"
+    # Text should be the URI as fallback (or some non-empty string)
+    assert msg.message  # non-empty

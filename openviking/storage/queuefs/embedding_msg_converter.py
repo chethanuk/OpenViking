@@ -23,6 +23,9 @@ class EmbeddingMsgConverter:
         Convert a Context object to EmbeddingMsg.
         """
         vectorization_text = context.get_vectorization_text()
+        # If text is empty but media is present, use URI as fallback so the message isn't dropped
+        if not vectorization_text and getattr(context.vectorize, "media", None) is not None:
+            vectorization_text = context.uri or ""
         if not vectorization_text:
             return None
 
