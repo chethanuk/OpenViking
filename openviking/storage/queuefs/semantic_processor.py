@@ -572,7 +572,8 @@ class SemanticProcessor(DequeueHandlerBase):
             embedding_provider = getattr(
                 getattr(get_openviking_config().embedding, "dense", None), "provider", None
             )
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to resolve embedding provider; multimodal path disabled: %s", e, exc_info=True)
             embedding_provider = None
 
         active_ctx = ctx or self._current_ctx

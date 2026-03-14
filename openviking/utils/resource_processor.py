@@ -88,7 +88,8 @@ class ResourceProcessor:
             embedding_provider = (
                 getattr(getattr(getattr(ov_config, "embedding", None), "dense", None), "provider", None)
             )
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to resolve embedding provider; multimodal path disabled: %s", e, exc_info=True)
             embedding_provider = None
         for uri in resource_uris:
             await index_resource(uri, ctx, embedding_provider=embedding_provider)

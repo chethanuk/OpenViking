@@ -212,7 +212,7 @@ import pytest
 def test_gemini_provider_valid():
     from openviking_cli.utils.config.embedding_config import EmbeddingModelConfig
     cfg = EmbeddingModelConfig(
-        model="gemini-embedding-2-preview", provider="gemini", api_key="key", dimension=3072
+        model="gemini-embedding-2-preview", provider="gemini", api_key="test-key", dimension=3072
     )
     assert cfg.provider == "gemini"
     assert cfg.dimension == 3072
@@ -229,7 +229,7 @@ def test_gemini_task_type_field():
     cfg = EmbeddingModelConfig(
         model="gemini-embedding-2-preview",
         provider="gemini",
-        api_key="key",
+        api_key="test-key",
         task_type="RETRIEVAL_DOCUMENT",
     )
     assert cfg.task_type == "RETRIEVAL_DOCUMENT"
