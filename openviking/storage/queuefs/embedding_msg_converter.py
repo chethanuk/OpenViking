@@ -9,6 +9,7 @@ to EmbeddingMsg objects for asynchronous vector processing.
 
 from openviking.core.context import Context, ContextLevel
 from openviking.storage.queuefs.embedding_msg import EmbeddingMsg
+from openviking.telemetry import get_current_telemetry
 from openviking_cli.utils import get_logger
 
 logger = get_logger(__name__)
@@ -23,9 +24,6 @@ class EmbeddingMsgConverter:
         Convert a Context object to EmbeddingMsg.
         """
         vectorization_text = context.get_vectorization_text()
-        # If text is empty but media is present, use URI as fallback so the message isn't dropped
-        if not vectorization_text and getattr(context.vectorize, "media", None) is not None:
-            vectorization_text = context.uri or ""
         if not vectorization_text:
             return None
 
@@ -71,16 +69,9 @@ class EmbeddingMsgConverter:
             resolved_level = int(resolved_level.value)
         context_data["level"] = int(resolved_level)
 
-        media_uri = None
-        media_mime_type = None
-        if getattr(context.vectorize, "media", None) is not None:
-            media_uri = context.vectorize.media.uri
-            media_mime_type = context.vectorize.media.mime_type
-
         embedding_msg = EmbeddingMsg(
             message=vectorization_text,
             context_data=context_data,
-            media_uri=media_uri,
-            media_mime_type=media_mime_type,
+            telemetry_id=get_current_telemetry().telemetry_id,
         )
         return embedding_msg

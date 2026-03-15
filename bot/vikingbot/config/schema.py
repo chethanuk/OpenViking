@@ -388,15 +388,15 @@ class AgentsConfig(BaseModel):
     provider: str = ""
     api_key: str = ""
     api_base: str = ""
-    extra_headers: dict[str, str] = None
+    extra_headers: Optional[dict[str, str]] = Field(default_factory=dict)
 
 
 class ProviderConfig(BaseModel):
     """LLM provider configuration."""
 
     api_key: str = ""
-    api_base: str | None = None
-    extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
+    api_base: Optional[str] = None
+    extra_headers: Optional[dict[str, str]] = Field(default_factory=dict)  # Custom headers (e.g. APP-Code for AiHubMix)
 
 
 class ProvidersConfig(BaseModel):
@@ -613,7 +613,7 @@ class Config(BaseSettings):
             "summarize",
         ]
     )
-    storage_workspace: str | None = None  # From ov.conf root level storage.workspace
+    storage_workspace: Optional[str] = None  # From ov.conf root level storage.workspace
     use_local_memory: bool = False
     read_only: bool = False
 
@@ -627,7 +627,8 @@ class Config(BaseSettings):
     @property
     def bot_data_path(self) -> Path:
         """Get expanded bot data path: {storage_workspace}/bot."""
-        return Path(self.storage_workspace).expanduser() / "bot"
+        workspace = self.storage_workspace or "~/.openviking/data"
+        return Path(workspace).expanduser() / "bot"
 
     @property
     def workspace_path(self) -> Path:

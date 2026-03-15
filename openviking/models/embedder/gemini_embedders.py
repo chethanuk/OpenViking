@@ -105,6 +105,10 @@ class GeminiDenseEmbedder(DenseEmbedderBase):
             raise RuntimeError(f"Gemini embedding failed (code={e.code}): {e}") from e
 
     def embed_multimodal(self, vectorize: "Vectorize") -> EmbedResult:  # type: ignore[name-defined]
+        # TODO(April): upgrade `vectorize` to carry a `parts: List[Part]` instead of a single
+        # `media` field to support interleaved text+media sequences (e.g. multi-page PDF chunks).
+        # Gemini Embedding 2 supports parts aggregation natively — see:
+        # https://ai.google.dev/gemini-api/docs/embeddings#embedding-aggregation
         media = getattr(vectorize, "media", None)
         if (
             media is None
