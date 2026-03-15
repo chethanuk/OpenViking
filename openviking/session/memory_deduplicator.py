@@ -124,7 +124,7 @@ class MemoryDeduplicator:
 
         # Generate embedding for candidate
         query_text = f"{candidate.abstract} {candidate.content}"
-        embed_result: EmbedResult = self.embedder.embed(query_text)
+        embed_result: EmbedResult = self.embedder.embed_query(query_text)
         query_vector = embed_result.dense_vector
 
         category_uri_prefix = self._category_uri_prefix(candidate.category.value, candidate.user)

@@ -235,6 +235,21 @@ def test_gemini_task_type_field():
     assert cfg.task_type == "RETRIEVAL_DOCUMENT"
 
 
+def test_gemini_task_type_field_still_accepted_with_deprecation_notice():
+    """task_type is deprecated but must still be accepted — no validation error."""
+    from openviking_cli.utils.config.embedding_config import EmbeddingModelConfig
+    cfg = EmbeddingModelConfig(
+        model="gemini-embedding-2-preview",
+        provider="gemini",
+        api_key="test-key",
+        task_type="RETRIEVAL_DOCUMENT",
+    )
+    assert cfg.task_type == "RETRIEVAL_DOCUMENT"
+    # Field description must carry the deprecation notice
+    field_info = EmbeddingModelConfig.model_fields["task_type"]
+    assert "DEPRECATED" in (field_info.description or "")
+
+
 def test_gemini_factory_creates_gemini_embedder():
     from unittest.mock import patch
     from openviking_cli.utils.config.embedding_config import EmbeddingConfig

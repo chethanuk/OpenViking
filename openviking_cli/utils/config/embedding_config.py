@@ -29,7 +29,19 @@ class EmbeddingModelConfig(BaseModel):
     host: Optional[str] = Field(default=None, description="Host for VikingDB API")
     task_type: Optional[str] = Field(
         default=None,
-        description="Gemini task type: RETRIEVAL_DOCUMENT, RETRIEVAL_QUERY, SEMANTIC_SIMILARITY",
+        description=(
+            "[DEPRECATED] Gemini index task type override. "
+            "RETRIEVAL_DOCUMENT is now used by default for indexing; "
+            "RETRIEVAL_QUERY is used automatically for search."
+        ),
+    )
+    enable_multimodal: bool = Field(
+        default=False,
+        description=(
+            "Enable multimodal embedding (image/audio/video/PDF) for Gemini. "
+            "Default False — pure text embedder. "
+            "Set to true in April when OpenViking add-resource fully supports multimodal."
+        ),
     )
 
     model_config = {"extra": "forbid"}
@@ -245,6 +257,7 @@ class EmbeddingConfig(BaseModel):
                     "api_key": cfg.api_key,
                     "dimension": cfg.dimension,
                     "task_type": cfg.task_type,
+                    "enable_multimodal": cfg.enable_multimodal,
                 },
             ),
         }

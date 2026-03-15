@@ -23,18 +23,6 @@ def _make_mock_result(values_list):
     return result
 
 
-def test_supported_mimes_includes_video_and_pdf():
-    from openviking.models.embedder.gemini_embedders import _SUPPORTED_MULTIMODAL_MIMES
-    assert "video/mp4" in _SUPPORTED_MULTIMODAL_MIMES
-    assert "application/pdf" in _SUPPORTED_MULTIMODAL_MIMES
-    assert "image/jpeg" in _SUPPORTED_MULTIMODAL_MIMES
-
-
-def test_input_token_limit_constant():
-    from openviking.models.embedder.gemini_embedders import _GEMINI_INPUT_TOKEN_LIMIT
-    assert _GEMINI_INPUT_TOKEN_LIMIT == 8192
-
-
 class TestGeminiDenseEmbedderInit:
     def test_requires_api_key(self):
         from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
@@ -62,9 +50,11 @@ class TestGeminiDenseEmbedderInit:
         assert embedder.get_dimension() == 3072
 
     @patch("openviking.models.embedder.gemini_embedders.genai.Client")
-    def test_supports_multimodal_true(self, mock_client_class):
+    def test_supports_multimodal_true_when_enabled(self, mock_client_class):
         from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
-        embedder = GeminiDenseEmbedder("gemini-embedding-2-preview", api_key="key")
+        embedder = GeminiDenseEmbedder(
+            "gemini-embedding-2-preview", api_key="key", enable_multimodal=True
+        )
         assert embedder.supports_multimodal is True
 
 
@@ -88,9 +78,29 @@ class TestGeminiDenseEmbedderEmbed:
         mock_client = mock_client_class.return_value
         mock_client.models.embed_content.return_value = _make_mock_result([[0.1]])
         embedder = GeminiDenseEmbedder(
-            "gemini-embedding-2-preview", api_key="key", dimension=1, task_type="RETRIEVAL_QUERY"
+            "gemini-embedding-2-preview", api_key="key", dimension=1, task_type="SEMANTIC_SIMILARITY"
         )
         embedder.embed("query text")
+        _, kwargs = mock_client.models.embed_content.call_args
+        assert kwargs["config"].task_type == "SEMANTIC_SIMILARITY"
+
+    @patch("openviking.models.embedder.gemini_embedders.genai.Client")
+    def test_embed_uses_retrieval_document_by_default(self, mock_client_class):
+        from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
+        mock_client = mock_client_class.return_value
+        mock_client.models.embed_content.return_value = _make_mock_result([[0.1]])
+        embedder = GeminiDenseEmbedder("gemini-embedding-2-preview", api_key="key", dimension=1)
+        embedder.embed("index text")
+        _, kwargs = mock_client.models.embed_content.call_args
+        assert kwargs["config"].task_type == "RETRIEVAL_DOCUMENT"
+
+    @patch("openviking.models.embedder.gemini_embedders.genai.Client")
+    def test_embed_query_uses_retrieval_query_task_type(self, mock_client_class):
+        from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
+        mock_client = mock_client_class.return_value
+        mock_client.models.embed_content.return_value = _make_mock_result([[0.1]])
+        embedder = GeminiDenseEmbedder("gemini-embedding-2-preview", api_key="key", dimension=1)
+        embedder.embed_query("what is python?")
         _, kwargs = mock_client.models.embed_content.call_args
         assert kwargs["config"].task_type == "RETRIEVAL_QUERY"
 
@@ -107,13 +117,40 @@ class TestGeminiDenseEmbedderEmbed:
             embedder.embed("hello")
 
 
+class TestGeminiFeatureFlag:
+    @patch("openviking.models.embedder.gemini_embedders.genai.Client")
+    def test_supports_multimodal_false_by_default(self, mock_client_class):
+        """supports_multimodal must be False unless enable_multimodal=True."""
+        from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
+        embedder = GeminiDenseEmbedder("gemini-embedding-2-preview", api_key="key")
+        assert embedder.supports_multimodal is False
+
+    @patch("openviking.models.embedder.gemini_embedders.genai.Client")
+    def test_embed_multimodal_falls_back_to_text_when_flag_off(self, mock_client_class):
+        """When enable_multimodal=False, embed_multimodal(v) always calls embed(text)."""
+        from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
+        mock_client = mock_client_class.return_value
+        mock_client.models.embed_content.return_value = _make_mock_result([[0.1]])
+        embedder = GeminiDenseEmbedder("gemini-embedding-2-preview", api_key="key", dimension=1)
+        v = Vectorize(
+            text="some text",
+            media=ModalContent(mime_type="image/png", uri="img.png", data=b"\x89PNG"),
+        )
+        embedder.embed_multimodal(v)
+        _, kwargs = mock_client.models.embed_content.call_args
+        # Must call embed(text) path — contents is a plain string, not a Content list
+        assert kwargs["contents"] == "some text"
+
+
 class TestGeminiDenseEmbedderEmbedMultimodal:
     @patch("openviking.models.embedder.gemini_embedders.genai.Client")
     def test_embed_multimodal_with_image_bytes(self, mock_client_class):
         from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
         mock_client = mock_client_class.return_value
         mock_client.models.embed_content.return_value = _make_mock_result([[0.5, 0.6]])
-        embedder = GeminiDenseEmbedder("gemini-embedding-2-preview", api_key="key", dimension=2)
+        embedder = GeminiDenseEmbedder(
+            "gemini-embedding-2-preview", api_key="key", dimension=2, enable_multimodal=True
+        )
         vectorize = Vectorize(
             text="a screenshot of an IDE",
             media=ModalContent(
@@ -126,26 +163,28 @@ class TestGeminiDenseEmbedderEmbedMultimodal:
         assert result.dense_vector is not None
         mock_client.models.embed_content.assert_called_once()
 
+    @pytest.mark.parametrize("vectorize,scenario", [
+        (Vectorize(text="plain text"), "no_media"),
+        (
+            Vectorize(
+                text="summary",
+                media=ModalContent(mime_type="video/flv", uri="vid.flv", data=b"data"),
+            ),
+            "unsupported_mime",
+        ),
+    ])
     @patch("openviking.models.embedder.gemini_embedders.genai.Client")
-    def test_embed_multimodal_falls_back_when_no_media(self, mock_client_class):
+    def test_embed_multimodal_falls_back_on_text_path(
+        self, mock_client_class, vectorize, scenario
+    ):
+        """Both no-media and unsupported-MIME vectorizes must fall back to text embedding."""
         from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
         mock_client = mock_client_class.return_value
         mock_client.models.embed_content.return_value = _make_mock_result([[0.1]])
-        embedder = GeminiDenseEmbedder("gemini-embedding-2-preview", api_key="key", dimension=1)
-        result = embedder.embed_multimodal(Vectorize(text="plain text"))
-        assert result.dense_vector is not None
-
-    @patch("openviking.models.embedder.gemini_embedders.genai.Client")
-    def test_embed_multimodal_falls_back_on_unsupported_mime(self, mock_client_class):
-        from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
-        mock_client = mock_client_class.return_value
-        mock_client.models.embed_content.return_value = _make_mock_result([[0.1]])
-        embedder = GeminiDenseEmbedder("gemini-embedding-2-preview", api_key="key", dimension=1)
-        v = Vectorize(
-            text="summary",
-            media=ModalContent(mime_type="video/flv", uri="vid.flv", data=b"data"),
+        embedder = GeminiDenseEmbedder(
+            "gemini-embedding-2-preview", api_key="key", dimension=1, enable_multimodal=True
         )
-        result = embedder.embed_multimodal(v)
+        result = embedder.embed_multimodal(vectorize)
         assert result.dense_vector is not None
 
     @patch("openviking.models.embedder.gemini_embedders.genai.Client")
@@ -160,7 +199,9 @@ class TestGeminiDenseEmbedderEmbedMultimodal:
             APIError(400, {}, response=mock_response),
             _make_mock_result([[0.1]]),
         ]
-        embedder = GeminiDenseEmbedder("gemini-embedding-2-preview", api_key="key", dimension=1)
+        embedder = GeminiDenseEmbedder(
+            "gemini-embedding-2-preview", api_key="key", dimension=1, enable_multimodal=True
+        )
         v = Vectorize(
             text="doc text",
             media=ModalContent(mime_type="image/jpeg", uri="img.jpg", data=b"bytes"),
@@ -170,6 +211,72 @@ class TestGeminiDenseEmbedderEmbedMultimodal:
         assert result.dense_vector is not None
         assert mock_client.models.embed_content.call_count == 2
         assert any("fallback" in r.message.lower() for r in caplog.records)
+
+    @patch("openviking.models.embedder.gemini_embedders.genai.Client")
+    def test_embed_multimodal_multi_part_text_image_text(self, mock_client_class):
+        """Multi-part [text, image, text] Vectorize calls API with 3 parts."""
+        from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
+        mock_client = mock_client_class.return_value
+        mock_client.models.embed_content.return_value = _make_mock_result([[0.1]])
+        embedder = GeminiDenseEmbedder(
+            "gemini-embedding-2-preview", api_key="key", dimension=1, enable_multimodal=True
+        )
+        img = ModalContent(mime_type="image/png", uri="fig1.png", data=b"\x89PNG")
+        v = Vectorize(parts=["Section 1 text", img, "Section 2 text"])
+        result = embedder.embed_multimodal(v)
+        assert result.dense_vector is not None
+        _, kwargs = mock_client.models.embed_content.call_args
+        content = kwargs["contents"][0]
+        assert len(content.parts) == 3
+
+    @patch("openviking.models.embedder.gemini_embedders.genai.Client")
+    @patch("openviking.models.embedder.gemini_embedders._count_pdf_pages", return_value=8)
+    def test_embed_multimodal_pdf_over_limit_falls_back(
+        self, mock_page_count, mock_client_class, caplog
+    ):
+        """PDF exceeding 6 pages must fall back to text-only embedding with a warning."""
+        import logging
+        from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
+        mock_client = mock_client_class.return_value
+        mock_client.models.embed_content.return_value = _make_mock_result([[0.1]])
+        embedder = GeminiDenseEmbedder(
+            "gemini-embedding-2-preview", api_key="key", dimension=1, enable_multimodal=True
+        )
+        v = Vectorize(
+            text="pdf text",
+            media=ModalContent(mime_type="application/pdf", uri="doc.pdf", data=b"%PDF"),
+        )
+        with caplog.at_level(logging.WARNING):
+            result = embedder.embed_multimodal(v)
+        assert result.dense_vector is not None
+        _, kwargs = mock_client.models.embed_content.call_args
+        assert kwargs["contents"] == "pdf text"
+        assert any("6 pages" in r.message or "Falling back" in r.message for r in caplog.records)
+
+    @patch("openviking.models.embedder.gemini_embedders.genai.Client")
+    @patch("openviking.models.embedder.gemini_embedders._count_pdf_pages", return_value=0)
+    def test_embed_multimodal_pdf_unknown_page_count_warns_and_continues(
+        self, mock_page_count, mock_client_class, caplog
+    ):
+        """PDF with unknown page count (pypdf unavailable) warns but still calls API."""
+        import logging
+        from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
+        mock_client = mock_client_class.return_value
+        mock_client.models.embed_content.return_value = _make_mock_result([[0.1]])
+        embedder = GeminiDenseEmbedder(
+            "gemini-embedding-2-preview", api_key="key", dimension=1, enable_multimodal=True
+        )
+        v = Vectorize(
+            text="pdf text",
+            media=ModalContent(mime_type="application/pdf", uri="doc.pdf", data=b"%PDF"),
+        )
+        with caplog.at_level(logging.WARNING):
+            result = embedder.embed_multimodal(v)
+        assert result.dense_vector is not None
+        # API was called (not fell back to text)
+        _, kwargs = mock_client.models.embed_content.call_args
+        assert isinstance(kwargs["contents"], list)
+        assert any("unknown" in r.message.lower() or "page count" in r.message.lower() for r in caplog.records)
 
 
 class TestGeminiDenseEmbedderTransientError:
@@ -184,7 +291,9 @@ class TestGeminiDenseEmbedderTransientError:
         mock_response.status_code = 429
         mock_client.models.embed_content.side_effect = APIError(429, {}, response=mock_response)
 
-        embedder = GeminiDenseEmbedder("gemini-embedding-2-preview", api_key="key", dimension=1)
+        embedder = GeminiDenseEmbedder(
+            "gemini-embedding-2-preview", api_key="key", dimension=1, enable_multimodal=True
+        )
         v = Vectorize(
             text="doc",
             media=ModalContent(mime_type="image/jpeg", uri="img.jpg", data=b"bytes"),

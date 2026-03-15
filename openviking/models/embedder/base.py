@@ -148,9 +148,25 @@ class DenseEmbedderBase(EmbedderBase):
         """True when this embedder natively embeds image/audio bytes."""
         return False
 
+    def embed_query(self, text: str) -> "EmbedResult":
+        """Embed a query string. Default delegates to embed(). Subclasses override for task_type."""
+        return self.embed(text)
+
     def embed_multimodal(self, vectorize: "Vectorize") -> "EmbedResult":
         """Default implementation falls back to text — no breaking change."""
         return self.embed(getattr(vectorize, "text", str(vectorize)))
+
+    def embed_multimodal_batch(self, vectorizes: List["Vectorize"]) -> List["EmbedResult"]:
+        """Batch multimodal embed — default sequential. Override for concurrency."""
+        return [self.embed_multimodal(v) for v in vectorizes]
+
+    async def async_embed_multimodal_batch(
+        self, vectorizes: List["Vectorize"]
+    ) -> List["EmbedResult"]:
+        """Concurrent batch embed via asyncio.gather + thread pool."""
+        import asyncio
+        tasks = [asyncio.to_thread(self.embed_multimodal, v) for v in vectorizes]
+        return list(await asyncio.gather(*tasks))
 
 
 class SparseEmbedderBase(EmbedderBase):
