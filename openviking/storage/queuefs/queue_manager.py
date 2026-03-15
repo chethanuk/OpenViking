@@ -119,17 +119,17 @@ class QueueManager:
             vector_store: Vector store instance for handlers to write results.
         """
         # Import handlers here to avoid circular dependencies
-        from openviking.storage.collection_schemas import TextEmbeddingHandler
+        from openviking.storage.queuefs.embedding_handler import EmbeddingHandler
         from openviking.storage.queuefs import SemanticProcessor
 
         # Embedding Queue
-        embedding_handler = TextEmbeddingHandler(vector_store)
+        embedding_handler = EmbeddingHandler(vector_store)
         self.get_queue(
             self.EMBEDDING,
             dequeue_handler=embedding_handler,
             allow_create=True,
         )
-        logger.info("Embedding queue initialized with TextEmbeddingHandler")
+        logger.info("Embedding queue initialized with EmbeddingHandler")
 
         # Semantic Queue
         semantic_processor = SemanticProcessor(max_concurrent_llm=self._max_concurrent_semantic)
