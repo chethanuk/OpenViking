@@ -5,7 +5,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from uuid import uuid4
 
 from openviking.utils.time_utils import format_iso8601, parse_iso_datetime
@@ -50,15 +50,35 @@ class ModalContent:
     data: Optional[bytes] = field(default=None, repr=False)
 
 
+ContentPart = Union[str, ModalContent]
+
+
 class Vectorize:
     text: str = ""
-    # image: str = ""
-    # video: str = ""
-    # audio: str = ""
 
-    def __init__(self, text: str = "", media: Optional[ModalContent] = None):
+    def __init__(
+        self,
+        text: str = "",
+        media: Optional[ModalContent] = None,
+        parts: Optional[List[ContentPart]] = None,
+    ):
         self.text = text
         self.media = media
+        self.parts = parts
+
+    def get_parts(self) -> List[ContentPart]:
+        """Return canonical parts list.
+
+        Uses ``parts`` if explicitly set; otherwise builds [text, media] from legacy fields.
+        """
+        if self.parts is not None:
+            return self.parts
+        result: List[ContentPart] = []
+        if self.text:
+            result.append(self.text)
+        if self.media:
+            result.append(self.media)
+        return result
 
 
 class Context:

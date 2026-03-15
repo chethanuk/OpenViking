@@ -131,6 +131,32 @@ class TestGeminiE2EAsyncBatch:
         embedder.close()
 
 
+class TestGeminiE2EMultipartEmbedding:
+    def test_text_only_parts_list_produces_valid_embedding(self, embedder):
+        """Vectorize with parts=[text] falls back gracefully to text embed."""
+        v = Vectorize(parts=["Just some text in parts form"])
+        result = embedder.embed_multimodal(v)
+        assert result.dense_vector is not None
+        assert len(result.dense_vector) == 3072
+
+    @pytest.mark.xfail(reason="gemini-embedding-2-preview multimodal may not be on free tier")
+    def test_multi_part_text_image_text_produces_embedding(self):
+        """Multi-part [text, image, text] Vectorize produces a 3072-dim vector."""
+        import struct
+        import zlib
+        embedder = GeminiDenseEmbedder(
+            "gemini-embedding-2-preview",
+            api_key=_API_KEY,
+            enable_multimodal=True,
+        )
+        img = ModalContent(mime_type="image/png", uri="test.png", data=_make_tiny_png())
+        v = Vectorize(parts=["Description before image", img, "Description after image"])
+        result = embedder.embed_multimodal(v)
+        assert result.dense_vector is not None
+        assert len(result.dense_vector) == 3072
+        embedder.close()
+
+
 class TestGeminiE2ETaskType:
     def test_query_vs_document_task_types(self):
         doc_embedder = GeminiDenseEmbedder(
