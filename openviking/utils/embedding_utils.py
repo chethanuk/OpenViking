@@ -257,13 +257,26 @@ async def vectorize_file(
             ResourceContentType.IMAGE,
             ResourceContentType.VIDEO,
             ResourceContentType.AUDIO,
-        ) or is_pdf:
-            # TODO(April): enable multimodal dispatch via embedder.supports_multimodal once
-            # add-resource pipeline fully supports multimodal content (see PR #607 discussion).
+        ):
+            # TODO(April 2026): enable multimodal dispatch when add-resource pipeline is ready.
+            # Replace this block with:
+            #   if embedder.supports_multimodal:   ← use property, NOT string provider check
+            #       context.set_vectorize(Vectorize(text=fallback, media=ModalContent(...)))
+            # doubao-embedding-vision and other providers also expose supports_multimodal=True.
             if summary:
                 context.set_vectorize(Vectorize(text=summary))
             else:
                 logger.debug(f"Skipping media file {file_path}: no summary available")
+                return
+        elif is_pdf:
+            # PDF multimodal embedding excluded from pipeline: Gemini Embedding 2 hard-limits
+            # PDFs to 6 pages per request. Reliable embedding requires splitting the PDF into
+            # ≤6-page chunks and storing one vector per chunk — this needs add-resource pipeline
+            # support (planned April 2026). Until then, fall back to text summary.
+            if summary:
+                context.set_vectorize(Vectorize(text=summary))
+            else:
+                logger.debug(f"Skipping PDF {file_path}: no text summary for fallback")
                 return
         elif summary:
             # Fallback for unrecognized non-text files
