@@ -92,22 +92,22 @@ GOOGLE_API_KEY: Optional[str] = os.environ.get("GOOGLE_API_KEY")
 # (model_name, default_dim, token_limit) — for @pytest.mark.parametrize("model,dim,limit", ...)
 GEMINI_MODELS = [
     pytest.param("gemini-embedding-2-preview", 3072, 8192, id="g2p"),
-    pytest.param("gemini-embedding-001",       3072, 2048, id="g001"),
+    pytest.param("gemini-embedding-001", 3072, 2048, id="g001"),
 ]
 
 # Wrapped single-value tuples — for fixture params (request.param is the whole tuple)
 GEMINI_MODELS_FIXTURE = [
     pytest.param(("gemini-embedding-2-preview", 3072, 8192), id="g2p"),
-    pytest.param(("gemini-embedding-001",       3072, 2048), id="g001"),
+    pytest.param(("gemini-embedding-001", 3072, 2048), id="g001"),
 ]
 
 # (model_name, dimension) pairs for OpenViking client fixtures
 EMBED_PARAMS = [
-    pytest.param(("gemini-embedding-2-preview", 512),  id="g2p-512"),
-    pytest.param(("gemini-embedding-2-preview", 768),  id="g2p-768"),
+    pytest.param(("gemini-embedding-2-preview", 512), id="g2p-512"),
+    pytest.param(("gemini-embedding-2-preview", 768), id="g2p-768"),
     pytest.param(("gemini-embedding-2-preview", 1536), id="g2p-1536"),
     pytest.param(("gemini-embedding-2-preview", 3072), id="g2p-3072"),
-    pytest.param(("gemini-embedding-001",       768),  id="g001-768"),
+    pytest.param(("gemini-embedding-001", 768), id="g001-768"),
 ]
 
 
@@ -118,8 +118,9 @@ def l2_norm(vec) -> float:
 def vectordb_engine_available() -> bool:
     try:
         from openviking.storage.vectordb.engine import PersistStore, VolatileStore
+
         return isinstance(PersistStore, type) and isinstance(VolatileStore, type)
-    except Exception:
+    except (ImportError, ModuleNotFoundError, AttributeError):
         return False
 
 
@@ -130,12 +131,18 @@ def sample_markdown(tmp_dir: Path, slug: str, content: str) -> Path:
 
 
 def gemini_config_dict(
-    model: str, dim: int,
+    model: str,
+    dim: int,
     query_param: Optional[str] = None,
     doc_param: Optional[str] = None,
     task_type: Optional[str] = None,
 ) -> dict:
-    dense: dict = {"provider": "gemini", "model": model, "api_key": GOOGLE_API_KEY, "dimension": dim}
+    dense: dict = {
+        "provider": "gemini",
+        "model": model,
+        "api_key": GOOGLE_API_KEY,
+        "dimension": dim,
+    }
     if query_param:
         dense["query_param"] = query_param
     if doc_param:
@@ -148,6 +155,7 @@ def gemini_config_dict(
 async def make_ov_client(config_dict: dict, data_path: str):
     from openviking.async_client import AsyncOpenViking
     from openviking_cli.utils.config.open_viking_config import OpenVikingConfigSingleton
+
     await AsyncOpenViking.reset()
     OpenVikingConfigSingleton.reset_instance()
     OpenVikingConfigSingleton.initialize(config_dict=config_dict)
@@ -159,6 +167,7 @@ async def make_ov_client(config_dict: dict, data_path: str):
 async def teardown_ov_client():
     from openviking.async_client import AsyncOpenViking
     from openviking_cli.utils.config.open_viking_config import OpenVikingConfigSingleton
+
     await AsyncOpenViking.reset()
     OpenVikingConfigSingleton.reset_instance()
 
@@ -174,6 +183,7 @@ requires_engine = pytest.mark.skipif(
 def gemini_embedder(request):
     """Module-scoped GeminiDenseEmbedder at dim=768, parametrized over known models."""
     from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
+
     model_name, _, _ = request.param
     return GeminiDenseEmbedder(model_name, api_key=GOOGLE_API_KEY, dimension=768)
 

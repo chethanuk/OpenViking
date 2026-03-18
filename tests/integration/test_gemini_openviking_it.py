@@ -11,6 +11,7 @@ Run:
 
 NOTE: provider MUST be "gemini" — "google" is not a valid provider value.
 """
+
 from pathlib import Path
 
 import pytest
@@ -30,6 +31,7 @@ pytestmark = [requires_api_key, requires_engine]
 # ---------------------------------------------------------------------------
 # Test 1: Basic add-memory + search
 # ---------------------------------------------------------------------------
+
 
 async def test_add_and_search_basic(gemini_ov_client, tmp_path):
     """Add a single markdown document and verify it is returned by find()."""
@@ -53,6 +55,7 @@ async def test_add_and_search_basic(gemini_ov_client, tmp_path):
 # ---------------------------------------------------------------------------
 # Test 2: Batch — multiple documents, search returns relevant one
 # ---------------------------------------------------------------------------
+
 
 async def test_batch_documents_search(gemini_ov_client, tmp_path):
     """Add 5 documents on different topics; search returns the relevant one first."""
@@ -79,10 +82,14 @@ async def test_batch_documents_search(gemini_ov_client, tmp_path):
 # Test 3: Large text chunking
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("model,dim,token_limit", [
-    pytest.param("gemini-embedding-2-preview", 768, 8192, id="g2p-large"),
-    pytest.param("gemini-embedding-001",       768, 2048, id="g001-large"),
-])
+
+@pytest.mark.parametrize(
+    "model,dim,token_limit",
+    [
+        pytest.param("gemini-embedding-2-preview", 768, 8192, id="g2p-large"),
+        pytest.param("gemini-embedding-001", 768, 2048, id="g001-large"),
+    ],
+)
 async def test_large_text_add_and_search(model, dim, token_limit, tmp_path):
     """Add a document exceeding the model's token limit; verify chunking and searchability."""
     data_path = str(tmp_path / "ov_large")
@@ -108,22 +115,29 @@ async def test_large_text_add_and_search(model, dim, token_limit, tmp_path):
 # Test 4: RETRIEVAL_QUERY / RETRIEVAL_DOCUMENT routing via EmbeddingConfig
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("query_param,doc_param", [
-    pytest.param("RETRIEVAL_QUERY",     "RETRIEVAL_DOCUMENT",  id="retrieval-routing"),
-    pytest.param("SEMANTIC_SIMILARITY", "SEMANTIC_SIMILARITY", id="semantic-routing"),
-])
+
+@pytest.mark.parametrize(
+    "query_param,doc_param",
+    [
+        pytest.param("RETRIEVAL_QUERY", "RETRIEVAL_DOCUMENT", id="retrieval-routing"),
+        pytest.param("SEMANTIC_SIMILARITY", "SEMANTIC_SIMILARITY", id="semantic-routing"),
+    ],
+)
 async def test_retrieval_routing_workflow(query_param, doc_param, tmp_path):
     """Verify add+search works with non-symmetric task-type routing."""
     data_path = str(tmp_path / "ov_routing")
     Path(data_path).mkdir(parents=True, exist_ok=True)
 
     client = await make_ov_client(
-        gemini_config_dict("gemini-embedding-2-preview", 768, query_param=query_param, doc_param=doc_param),
+        gemini_config_dict(
+            "gemini-embedding-2-preview", 768, query_param=query_param, doc_param=doc_param
+        ),
         data_path,
     )
     try:
         doc = sample_markdown(
-            tmp_path, "routing_doc",
+            tmp_path,
+            "routing_doc",
             "# Retrieval Test\n\nOpenViking provides memory management for AI agents.",
         )
         result = await client.add_resource(path=str(doc), reason="routing IT", wait=True)
@@ -139,6 +153,7 @@ async def test_retrieval_routing_workflow(query_param, doc_param, tmp_path):
 # Test 5: Dimension variants — verify index schema uses requested dim
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("dim", [512, 768, 1536, 3072])
 async def test_dimension_variant_add_search(dim, tmp_path):
     """Each dimension variant should index and search without errors."""
@@ -146,9 +161,15 @@ async def test_dimension_variant_add_search(dim, tmp_path):
     Path(data_path).mkdir(parents=True, exist_ok=True)
 
     client = await make_ov_client(gemini_config_dict("gemini-embedding-2-preview", dim), data_path)
+    from openviking_cli.utils.config.open_viking_config import OpenVikingConfigSingleton
+
+    assert OpenVikingConfigSingleton.get_instance().embedding.dimension == dim, (
+        f"Expected embedder dimension={dim}, got {OpenVikingConfigSingleton.get_instance().embedding.dimension}"
+    )
     try:
         doc = sample_markdown(
-            tmp_path, f"dim_doc_{dim}",
+            tmp_path,
+            f"dim_doc_{dim}",
             f"# Dimension {dim} Test\n\nThis document is indexed with embedding dimension {dim}.",
         )
         result = await client.add_resource(path=str(doc), reason=f"dim={dim} IT", wait=True)
@@ -164,6 +185,7 @@ async def test_dimension_variant_add_search(dim, tmp_path):
 # Test 6: Multi-turn session + search (smoke test)
 # ---------------------------------------------------------------------------
 
+
 async def test_session_search_smoke(gemini_ov_client, tmp_path):
     """Session construction + embedding-based find works with Gemini embeddings.
 
@@ -174,7 +196,8 @@ async def test_session_search_smoke(gemini_ov_client, tmp_path):
     client, model, dim = gemini_ov_client
 
     doc = sample_markdown(
-        tmp_path, "session_doc",
+        tmp_path,
+        "session_doc",
         "# Python Testing\n\nPytest is a mature full-featured Python testing tool.",
     )
     await client.add_resource(path=str(doc), reason="session IT", wait=True)
@@ -183,4 +206,4 @@ async def test_session_search_smoke(gemini_ov_client, tmp_path):
     session.add_message("user", [TextPart("Tell me about Python testing.")])
 
     result = await client.find(query="pytest testing tool")
-    assert result.total >= 0, "Embedding-based find should complete without error"
+    assert result.total > 0, "Embedding-based find should return the indexed pytest doc"

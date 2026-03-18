@@ -13,6 +13,7 @@ import logging
 
 try:
     import anyio
+
     _ANYIO_AVAILABLE = True
 except ImportError:
     _ANYIO_AVAILABLE = False
@@ -37,16 +38,18 @@ _MODEL_TOKEN_LIMITS: Dict[str, int] = {
 }
 _DEFAULT_TOKEN_LIMIT = 2048  # conservative fallback for unknown future models
 
-_VALID_TASK_TYPES: frozenset = frozenset({
-    "RETRIEVAL_QUERY",
-    "RETRIEVAL_DOCUMENT",
-    "SEMANTIC_SIMILARITY",
-    "CLASSIFICATION",
-    "CLUSTERING",
-    "QUESTION_ANSWERING",
-    "FACT_VERIFICATION",
-    "CODE_RETRIEVAL_QUERY",
-})
+_VALID_TASK_TYPES: frozenset = frozenset(
+    {
+        "RETRIEVAL_QUERY",
+        "RETRIEVAL_DOCUMENT",
+        "SEMANTIC_SIMILARITY",
+        "CLASSIFICATION",
+        "CLUSTERING",
+        "QUESTION_ANSWERING",
+        "FACT_VERIFICATION",
+        "CODE_RETRIEVAL_QUERY",
+    }
+)
 
 _ERROR_HINTS: Dict[int, str] = {
     400: "Invalid request — check model name and task_type value.",
@@ -151,7 +154,7 @@ class GeminiDenseEmbedder(DenseEmbedderBase):
             config_kwargs["task_type"] = self.task_type
         self._embed_config = types.EmbedContentConfig(**config_kwargs)
 
-    def embed(self, text: str) -> EmbedResult:
+    def embed(self, text: str, is_query: bool = False) -> EmbedResult:
         # SDK accepts plain str; converts to REST Parts format internally.
         try:
             result = self.client.models.embed_content(
@@ -166,7 +169,7 @@ class GeminiDenseEmbedder(DenseEmbedderBase):
         except (APIError, ClientError) as e:
             _raise_api_error(e, self.model_name)
 
-    def embed_batch(self, texts: List[str]) -> List[EmbedResult]:
+    def embed_batch(self, texts: List[str], is_query: bool = False) -> List[EmbedResult]:
         if not texts:
             return []
         results: List[EmbedResult] = []
@@ -186,10 +189,11 @@ class GeminiDenseEmbedder(DenseEmbedderBase):
             except (APIError, ClientError) as e:
                 logger.warning(
                     "Gemini batch embed failed (HTTP %d) for batch of %d, falling back to individual",
-                    e.code, len(batch),
+                    e.code,
+                    len(batch),
                 )
                 for text in batch:
-                    results.append(self.embed(text))
+                    results.append(self.embed(text, is_query=is_query))
         return results
 
     async def async_embed_batch(self, texts: List[str]) -> List[EmbedResult]:
@@ -226,7 +230,8 @@ class GeminiDenseEmbedder(DenseEmbedderBase):
                 except (APIError, ClientError) as e:
                     logger.warning(
                         "Gemini async batch embed failed (HTTP %d) for batch of %d, falling back",
-                        e.code, len(batch),
+                        e.code,
+                        len(batch),
                     )
                     results[idx] = [
                         await anyio.to_thread.run_sync(self.embed, text) for text in batch

@@ -5,6 +5,7 @@ End-to-end integration tests for GeminiDenseEmbedder.
 Calls the real Gemini API — requires GOOGLE_API_KEY env var.
 Run: pytest tests/integration/test_gemini_e2e.py -v -m integration
 """
+
 import math
 
 import pytest
@@ -13,7 +14,6 @@ from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
 from tests.integration.conftest import GOOGLE_API_KEY, l2_norm, requires_api_key
 
 pytestmark = [pytest.mark.integration, requires_api_key]
-
 
 
 def _cosine_similarity(a: list, b: list) -> float:
@@ -71,7 +71,6 @@ class TestGeminiE2ETextEmbedding:
         assert sim_related > sim_unrelated
 
 
-
 class TestGeminiE2EAsyncBatch:
     @pytest.mark.anyio
     async def test_async_embed_batch_concurrent(self):
@@ -80,9 +79,8 @@ class TestGeminiE2EAsyncBatch:
         except ImportError:
             pytest.skip("anyio not installed")
         import time
-        e = GeminiDenseEmbedder(
-            "gemini-embedding-2-preview", api_key=GOOGLE_API_KEY, dimension=128
-        )
+
+        e = GeminiDenseEmbedder("gemini-embedding-2-preview", api_key=GOOGLE_API_KEY, dimension=128)
         texts = [f"sentence {i}" for i in range(300)]  # 3 batches of 100
         t0 = time.monotonic()
         results = await e.async_embed_batch(texts)

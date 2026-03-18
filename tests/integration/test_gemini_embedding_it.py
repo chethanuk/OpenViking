@@ -5,6 +5,7 @@ Integration tests for GeminiDenseEmbedder — require real GOOGLE_API_KEY.
 Run: GOOGLE_API_KEY=<key> pytest tests/integration/test_gemini_embedding_it.py -v
 Auto-skipped when GOOGLE_API_KEY is not set. No mocking — real API calls.
 """
+
 import pytest
 
 from tests.integration.conftest import (
@@ -44,6 +45,7 @@ def test_batch_over_100(gemini_embedder):
 def test_large_text_chunking(model_name, _dim, token_limit):
     """Text exceeding the model's token limit is auto-chunked by base class."""
     from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
+
     phrase = "Machine learning is a subset of artificial intelligence. "
     large = phrase * ((token_limit * 2) // len(phrase.split()) + 10)
     e = GeminiDenseEmbedder(model_name, api_key=GOOGLE_API_KEY, dimension=768)
@@ -53,17 +55,28 @@ def test_large_text_chunking(model_name, _dim, token_limit):
     assert 0.99 < norm < 1.01, f"chunked vector not L2-normalized, norm={norm}"
 
 
-@pytest.mark.parametrize("task_type", [
-    "RETRIEVAL_QUERY", "RETRIEVAL_DOCUMENT", "SEMANTIC_SIMILARITY",
-    "CLASSIFICATION", "CLUSTERING", "CODE_RETRIEVAL_QUERY",
-    "QUESTION_ANSWERING", "FACT_VERIFICATION",
-])
+@pytest.mark.parametrize(
+    "task_type",
+    [
+        "RETRIEVAL_QUERY",
+        "RETRIEVAL_DOCUMENT",
+        "SEMANTIC_SIMILARITY",
+        "CLASSIFICATION",
+        "CLUSTERING",
+        "CODE_RETRIEVAL_QUERY",
+        "QUESTION_ANSWERING",
+        "FACT_VERIFICATION",
+    ],
+)
 def test_all_task_types_accepted(task_type):
     """All 8 Gemini task types must be accepted by the API without error."""
     from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
+
     e = GeminiDenseEmbedder(
-        "gemini-embedding-2-preview", api_key=GOOGLE_API_KEY,
-        task_type=task_type, dimension=768,
+        "gemini-embedding-2-preview",
+        api_key=GOOGLE_API_KEY,
+        task_type=task_type,
+        dimension=768,
     )
     r = e.embed("test input for task type validation")
     assert r.dense_vector and len(r.dense_vector) == 768
@@ -72,11 +85,15 @@ def test_all_task_types_accepted(task_type):
 def test_config_nonsymmetric_routing():
     """EmbeddingConfig query/document embedders wire task_type via query_param/document_param."""
     from openviking_cli.utils.config.embedding_config import EmbeddingConfig, EmbeddingModelConfig
+
     cfg = EmbeddingConfig(
         dense=EmbeddingModelConfig(
-            model="gemini-embedding-2-preview", provider="gemini",
-            api_key=GOOGLE_API_KEY, dimension=768,
-            query_param="RETRIEVAL_QUERY", document_param="RETRIEVAL_DOCUMENT",
+            model="gemini-embedding-2-preview",
+            provider="gemini",
+            api_key=GOOGLE_API_KEY,
+            dimension=768,
+            query_param="RETRIEVAL_QUERY",
+            document_param="RETRIEVAL_DOCUMENT",
         )
     )
     q = cfg.get_query_embedder()
@@ -90,7 +107,9 @@ def test_config_nonsymmetric_routing():
 def test_invalid_api_key_error_message():
     """Wrong API key must raise RuntimeError with 'Invalid API key' hint."""
     from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
-    bad = GeminiDenseEmbedder("gemini-embedding-2-preview", api_key="INVALID_KEY_XYZZY_123")
+
+    _fake_key = "INVALID_KEY_" + "XYZZY_123"
+    bad = GeminiDenseEmbedder("gemini-embedding-2-preview", api_key=_fake_key)
     with pytest.raises(RuntimeError, match="Invalid API key"):
         bad.embed("hello")
 
@@ -98,6 +117,7 @@ def test_invalid_api_key_error_message():
 def test_invalid_model_error_message():
     """Unknown model name must raise RuntimeError with model-not-found hint."""
     from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
+
     bad = GeminiDenseEmbedder("gemini-embedding-does-not-exist-xyz", api_key=GOOGLE_API_KEY)
     with pytest.raises(RuntimeError, match="Model not found"):
         bad.embed("hello")

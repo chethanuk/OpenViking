@@ -1,6 +1,7 @@
 # Copyright (c) 2026 Beijing Volcano Engine Technology Co., Ltd.
 # SPDX-License-Identifier: Apache-2.0
 """Unit tests for Gemini-specific EmbeddingModelConfig and EmbeddingConfig behavior."""
+
 from unittest.mock import patch
 
 import pytest
@@ -49,16 +50,16 @@ class TestGeminiDimension:
 class TestGeminiContextRouting:
     @patch("openviking.models.embedder.gemini_embedders.genai.Client")
     def test_get_query_embedder_uses_query_param(self, _mock):
-        cfg = EmbeddingConfig(dense=_gcfg(
-            query_param="RETRIEVAL_QUERY", document_param="RETRIEVAL_DOCUMENT"
-        ))
+        cfg = EmbeddingConfig(
+            dense=_gcfg(query_param="RETRIEVAL_QUERY", document_param="RETRIEVAL_DOCUMENT")
+        )
         assert cfg.get_query_embedder().task_type == "RETRIEVAL_QUERY"
 
     @patch("openviking.models.embedder.gemini_embedders.genai.Client")
     def test_get_document_embedder_uses_document_param(self, _mock):
-        cfg = EmbeddingConfig(dense=_gcfg(
-            query_param="RETRIEVAL_QUERY", document_param="RETRIEVAL_DOCUMENT"
-        ))
+        cfg = EmbeddingConfig(
+            dense=_gcfg(query_param="RETRIEVAL_QUERY", document_param="RETRIEVAL_DOCUMENT")
+        )
         assert cfg.get_document_embedder().task_type == "RETRIEVAL_DOCUMENT"
 
     @patch("openviking.models.embedder.gemini_embedders.genai.Client")
@@ -98,8 +99,13 @@ class TestGeminiConfigValidation:
 
     def test_valid_task_types_accepted(self):
         for t in [
-            "RETRIEVAL_QUERY", "RETRIEVAL_DOCUMENT", "SEMANTIC_SIMILARITY",
-            "CLASSIFICATION", "CLUSTERING", "QUESTION_ANSWERING",
-            "FACT_VERIFICATION", "CODE_RETRIEVAL_QUERY",
+            "RETRIEVAL_QUERY",
+            "RETRIEVAL_DOCUMENT",
+            "SEMANTIC_SIMILARITY",
+            "CLASSIFICATION",
+            "CLUSTERING",
+            "QUESTION_ANSWERING",
+            "FACT_VERIFICATION",
+            "CODE_RETRIEVAL_QUERY",
         ]:
             _gcfg(task_type=t)  # must not raise

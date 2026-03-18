@@ -55,7 +55,7 @@ class EmbeddingModelConfig(BaseModel):
     )
     version: Optional[str] = Field(default=None, description="Model version")
     ak: Optional[str] = Field(default=None, description="Access Key ID for VikingDB API")
-    sk: Optional[str] = Field(default=None, description="Access Key Secretfor VikingDB API")
+    sk: Optional[str] = Field(default=None, description="Access Key Secret for VikingDB API")
     region: Optional[str] = Field(default=None, description="Region for VikingDB API")
     host: Optional[str] = Field(default=None, description="Host for VikingDB API")
     max_tokens: Optional[int] = Field(
@@ -110,7 +110,13 @@ class EmbeddingModelConfig(BaseModel):
             raise ValueError("Embedding provider is required")
 
         if self.provider not in [
-            "openai", "volcengine", "vikingdb", "jina", "ollama", "voyage", "gemini"
+            "openai",
+            "volcengine",
+            "vikingdb",
+            "jina",
+            "ollama",
+            "voyage",
+            "gemini",
         ]:
             raise ValueError(
                 f"Invalid embedding provider: '{self.provider}'. "
@@ -153,9 +159,14 @@ class EmbeddingModelConfig(BaseModel):
             if not self.api_key:
                 raise ValueError("Gemini provider requires 'api_key' to be set")
             _GEMINI_TASK_TYPES = {
-                "RETRIEVAL_QUERY", "RETRIEVAL_DOCUMENT", "SEMANTIC_SIMILARITY",
-                "CLASSIFICATION", "CLUSTERING", "QUESTION_ANSWERING",
-                "FACT_VERIFICATION", "CODE_RETRIEVAL_QUERY",
+                "RETRIEVAL_QUERY",
+                "RETRIEVAL_DOCUMENT",
+                "SEMANTIC_SIMILARITY",
+                "CLASSIFICATION",
+                "CLUSTERING",
+                "QUESTION_ANSWERING",
+                "FACT_VERIFICATION",
+                "CODE_RETRIEVAL_QUERY",
             }
             for field_name, value in [
                 ("query_param", self.query_param),
@@ -184,10 +195,12 @@ class EmbeddingModelConfig(BaseModel):
             from openviking.models.embedder.voyage_embedders import (
                 get_voyage_model_default_dimension,
             )
+
             return get_voyage_model_default_dimension(self.model)
 
         if provider == "gemini":
             from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
+
             return GeminiDenseEmbedder._default_dimension(self.model)
 
         return 2048
@@ -361,8 +374,10 @@ class EmbeddingConfig(BaseModel):
                     "api_key": cfg.api_key,
                     "dimension": cfg.dimension,
                     "task_type": (
-                        cfg.query_param if context == "query" and cfg.query_param
-                        else cfg.document_param if context == "document" and cfg.document_param
+                        cfg.query_param
+                        if context == "query" and cfg.query_param
+                        else cfg.document_param
+                        if context == "document" and cfg.document_param
                         else cfg.task_type
                     ),
                 },
