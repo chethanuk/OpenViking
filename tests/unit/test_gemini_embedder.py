@@ -217,3 +217,64 @@ class TestGeminiDenseEmbedderAsyncBatch:
         embedder = GeminiDenseEmbedder("gemini-embedding-2-preview", api_key="key")
         with pytest.raises(ImportError, match="anyio is required"):
             await embedder.async_embed_batch(["text"])
+
+
+class TestGeminiValidation:
+    @patch("openviking.models.embedder.gemini_embedders.genai.Client")
+    def test_all_valid_task_types_accepted(self, mock_client):
+        from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder, _VALID_TASK_TYPES
+        for tt in _VALID_TASK_TYPES:
+            e = GeminiDenseEmbedder("gemini-embedding-2-preview", api_key="k", task_type=tt)
+            assert e.task_type == tt
+
+    def test_invalid_task_type_raises_on_init(self):
+        from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
+        with pytest.raises(ValueError, match="Invalid task_type"):
+            GeminiDenseEmbedder("gemini-embedding-2-preview", api_key="k", task_type="NOT_VALID")
+
+    def test_valid_task_types_count(self):
+        from openviking.models.embedder.gemini_embedders import _VALID_TASK_TYPES
+        assert len(_VALID_TASK_TYPES) == 8
+
+    def test_code_retrieval_query_in_task_types(self):
+        from openviking.models.embedder.gemini_embedders import _VALID_TASK_TYPES
+        assert "CODE_RETRIEVAL_QUERY" in _VALID_TASK_TYPES
+
+    @patch("openviking.models.embedder.gemini_embedders.genai.Client")
+    def test_dimension_too_high_raises(self, mock_client):
+        from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
+        with pytest.raises(ValueError, match="3072"):
+            GeminiDenseEmbedder("gemini-embedding-2-preview", api_key="k", dimension=4096)
+
+
+class TestGeminiErrorMessages:
+    @pytest.mark.parametrize("code,match", [
+        (401, "Invalid API key"),
+        (403, "Permission denied"),
+        (404, "Model not found"),
+        (429, "Quota exceeded"),
+        (500, "service error"),
+    ])
+    @patch("openviking.models.embedder.gemini_embedders.genai.Client")
+    def test_error_code_hint(self, mock_client, code, match):
+        from google.genai.errors import APIError
+        from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
+        mock = mock_client.return_value
+        mock_resp = MagicMock()
+        mock_resp.status_code = code
+        mock.models.embed_content.side_effect = APIError(code, {}, response=mock_resp)
+        embedder = GeminiDenseEmbedder("gemini-embedding-2-preview", api_key="k")
+        with pytest.raises(RuntimeError, match=match):
+            embedder.embed("hello")
+
+    @patch("openviking.models.embedder.gemini_embedders.genai.Client")
+    def test_error_message_includes_http_code(self, mock_client):
+        from google.genai.errors import APIError
+        from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
+        mock = mock_client.return_value
+        mock_resp = MagicMock()
+        mock_resp.status_code = 404
+        mock.models.embed_content.side_effect = APIError(404, {}, response=mock_resp)
+        embedder = GeminiDenseEmbedder("gemini-embedding-2-preview", api_key="k")
+        with pytest.raises(RuntimeError, match="HTTP 404"):
+            embedder.embed("hello")
