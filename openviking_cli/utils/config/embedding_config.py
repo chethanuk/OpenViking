@@ -41,14 +41,17 @@ class EmbeddingModelConfig(BaseModel):
     provider: Optional[str] = Field(
         default="volcengine",
         description=(
-            "Provider type: 'openai', 'volcengine', 'vikingdb', 'jina', 'ollama', 'gemini'", 'voyage'. "
+            "Provider type: 'openai', 'volcengine', 'vikingdb', 'jina', 'ollama', 'gemini', 'voyage'. "
             "For OpenRouter or other OpenAI-compatible providers, use 'openai' with "
             "api_base and extra_headers."
         ),
     )
     backend: Optional[str] = Field(
         default="volcengine",
-        description="Backend type (Deprecated, use 'provider' instead): 'openai', 'volcengine', 'vikingdb', 'voyage'", 'gemini'",
+        description=(
+            "Backend type (Deprecated, use 'provider' instead): "
+            "'openai', 'volcengine', 'vikingdb', 'voyage', 'gemini'"
+        ),
     )
     version: Optional[str] = Field(default=None, description="Model version")
     ak: Optional[str] = Field(default=None, description="Access Key ID for VikingDB API")
@@ -61,7 +64,13 @@ class EmbeddingModelConfig(BaseModel):
     )
     task_type: Optional[str] = Field(
         default=None,
-        description="Gemini task type: RETRIEVAL_DOCUMENT, RETRIEVAL_QUERY, SEMANTIC_SIMILARITY",
+        description=(
+            "Gemini task type. Valid: RETRIEVAL_QUERY, RETRIEVAL_DOCUMENT, "
+            "SEMANTIC_SIMILARITY, CLASSIFICATION, CLUSTERING, "
+            "QUESTION_ANSWERING, FACT_VERIFICATION, CODE_RETRIEVAL_QUERY. "
+            "For non-symmetric mode set query_param/document_param instead."
+        ),
+    )
     extra_headers: Optional[dict[str, str]] = Field(
         default=None,
         description=(
@@ -82,13 +91,7 @@ class EmbeddingModelConfig(BaseModel):
 
             if backend is not None and provider is None:
                 data["provider"] = backend
-            for key in (
-                "input_type",
-                "query_value",
-                "document_value",
-                "query_task",
-                "document_task",
-            ):
+            for key in ("input_type",):
                 value = data.get(key)
                 if isinstance(value, str):
                     data[key] = value.lower()
@@ -106,10 +109,12 @@ class EmbeddingModelConfig(BaseModel):
         if not self.provider:
             raise ValueError("Embedding provider is required")
 
-        if self.provider not in ["openai", "volcengine", "vikingdb", "jina", "ollama", "voyage", "gemini"]:
+        if self.provider not in [
+            "openai", "volcengine", "vikingdb", "jina", "ollama", "voyage", "gemini"
+        ]:
             raise ValueError(
-                f"Invalid embedding provider: '{self.provider}'. Must be one of: "
-                "'openai', 'volcengine', 'vikingdb', 'jina', 'ollama', 'voyage'", 'gemini'"
+                f"Invalid embedding provider: '{self.provider}'. "
+                "Must be one of: 'openai', 'volcengine', 'vikingdb', 'jina', 'ollama', 'voyage', 'gemini'"
             )
 
         # Provider-specific validation
@@ -147,6 +152,21 @@ class EmbeddingModelConfig(BaseModel):
         elif self.provider == "gemini":
             if not self.api_key:
                 raise ValueError("Gemini provider requires 'api_key' to be set")
+            _GEMINI_TASK_TYPES = {
+                "RETRIEVAL_QUERY", "RETRIEVAL_DOCUMENT", "SEMANTIC_SIMILARITY",
+                "CLASSIFICATION", "CLUSTERING", "QUESTION_ANSWERING",
+                "FACT_VERIFICATION", "CODE_RETRIEVAL_QUERY",
+            }
+            for field_name, value in [
+                ("query_param", self.query_param),
+                ("document_param", self.document_param),
+                ("task_type", self.task_type),
+            ]:
+                if value and value not in _GEMINI_TASK_TYPES:
+                    raise ValueError(
+                        f"Invalid {field_name} '{value}' for Gemini. "
+                        f"Valid task_types: {', '.join(sorted(_GEMINI_TASK_TYPES))}"
+                    )
         elif self.provider == "voyage":
             if not self.api_key:
                 raise ValueError("Voyage provider requires 'api_key' to be set")
@@ -163,8 +183,11 @@ class EmbeddingModelConfig(BaseModel):
             from openviking.models.embedder.voyage_embedders import (
                 get_voyage_model_default_dimension,
             )
-
             return get_voyage_model_default_dimension(self.model)
+
+        if provider == "gemini":
+            from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
+            return GeminiDenseEmbedder.KNOWN_DIMENSIONS.get(self.model, 3072)
 
         return 2048
 
@@ -336,7 +359,11 @@ class EmbeddingConfig(BaseModel):
                     "model_name": cfg.model,
                     "api_key": cfg.api_key,
                     "dimension": cfg.dimension,
-                    "task_type": cfg.task_type,
+                    "task_type": (
+                        cfg.query_param if context == "query" and cfg.query_param
+                        else cfg.document_param if context == "document" and cfg.document_param
+                        else cfg.task_type
+                    ),
                 },
             ),
             # Ollama: local OpenAI-compatible embedding server, no real API key needed
@@ -433,6 +460,13 @@ class EmbeddingConfig(BaseModel):
         if provider == "jina":
             # Jina models are non-symmetric by default (task is always sent).
             return self._create_embedder(provider, "dense", self.dense, context=context)
+
+        if provider == "gemini":
+            non_symmetric = (
+                self.dense.query_param is not None or self.dense.document_param is not None
+            )
+            effective_context = context if non_symmetric else None
+            return self._create_embedder(provider, "dense", self.dense, context=effective_context)
 
         return self.get_embedder()
 

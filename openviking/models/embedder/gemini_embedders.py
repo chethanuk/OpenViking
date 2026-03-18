@@ -53,7 +53,7 @@ _ERROR_HINTS: Dict[int, str] = {
 
 def _raise_api_error(e: APIError, model: str) -> None:
     hint = _ERROR_HINTS.get(e.code, "")
-    msg = f"Gemini embedding error (HTTP {e.code})"
+    msg = f"Gemini embedding failed (HTTP {e.code})"
     if hint:
         msg += f": {hint.format(model=model)}"
     raise RuntimeError(msg) from e
@@ -63,7 +63,7 @@ class GeminiDenseEmbedder(DenseEmbedderBase):
     """Dense embedder backed by Google's Gemini Embedding 2 model.
 
     Input token limit: 8,192 tokens per request (auto-chunked by base class).
-    Output dimension: 128–3072 (recommended: 768, 1536, 3072; default: 3072).
+    Output dimension: 1–3072 (recommended: 768, 1536, 3072; default: 3072).
     Task types: RETRIEVAL_QUERY, RETRIEVAL_DOCUMENT, SEMANTIC_SIMILARITY,
                 CLASSIFICATION, CLUSTERING, QUESTION_ANSWERING,
                 FACT_VERIFICATION, CODE_RETRIEVAL_QUERY.
@@ -93,8 +93,8 @@ class GeminiDenseEmbedder(DenseEmbedderBase):
                 f"Invalid task_type '{task_type}'. "
                 f"Valid values: {', '.join(sorted(_VALID_TASK_TYPES))}"
             )
-        if dimension is not None and not (128 <= dimension <= 3072):
-            raise ValueError(f"dimension must be between 128 and 3072, got {dimension}")
+        if dimension is not None and not (1 <= dimension <= 3072):
+            raise ValueError(f"dimension must be between 1 and 3072, got {dimension}")
         self.client = genai.Client(api_key=api_key)
         self.task_type = task_type
         self._dimension = dimension or self.KNOWN_DIMENSIONS.get(model_name, 3072)
