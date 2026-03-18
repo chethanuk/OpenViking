@@ -139,6 +139,17 @@ class TestGeminiDenseEmbedderEmbed:
         with pytest.raises(RuntimeError, match="Gemini embedding failed"):
             embedder.embed("hello")
 
+    @patch("openviking.models.embedder.gemini_embedders.genai.Client")
+    def test_embed_empty_string_returns_zero_vector(self, mock_client_class):
+        from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
+
+        mock_client = mock_client_class.return_value
+        embedder = GeminiDenseEmbedder("gemini-embedding-2-preview", api_key="key", dimension=3)
+        for text in ["", "   ", "\t\n"]:
+            result = embedder.embed(text)
+            assert result.dense_vector == [0.0, 0.0, 0.0]
+        mock_client.models.embed_content.assert_not_called()
+
 
 class TestGeminiDenseEmbedderBatch:
     @patch("openviking.models.embedder.gemini_embedders.genai.Client")
@@ -150,6 +161,25 @@ class TestGeminiDenseEmbedderBatch:
         results = embedder.embed_batch([])
         assert results == []
         mock_client.models.embed_content.assert_not_called()
+
+    @patch("openviking.models.embedder.gemini_embedders.genai.Client")
+    def test_embed_batch_skips_empty_strings(self, mock_client_class):
+        from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
+
+        mock_client = mock_client_class.return_value
+        mock_client.models.embed_content.return_value = _make_mock_result([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]])
+        embedder = GeminiDenseEmbedder("gemini-embedding-2-preview", api_key="key", dimension=3)
+        results = embedder.embed_batch(["hello", "", "world", "  "])
+        assert len(results) == 4
+        # Empty positions get zero vectors
+        assert results[1].dense_vector == [0.0, 0.0, 0.0]
+        assert results[3].dense_vector == [0.0, 0.0, 0.0]
+        # Non-empty positions have actual embeddings
+        assert results[0].dense_vector is not None
+        assert results[2].dense_vector is not None
+        # API only called with non-empty texts
+        _, kwargs = mock_client.models.embed_content.call_args
+        assert kwargs["contents"] == ["hello", "world"]
 
     @patch("openviking.models.embedder.gemini_embedders.genai.Client")
     def test_embed_batch_single_chunk(self, mock_client_class):

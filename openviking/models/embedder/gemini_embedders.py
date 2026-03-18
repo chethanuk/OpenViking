@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Gemini Embedding 2 provider using the official google-genai SDK."""
 
-import math
 from typing import Any, Dict, List, Optional
 
 from google import genai
@@ -60,12 +59,6 @@ _ERROR_HINTS: Dict[int, str] = {
     500: "Gemini service error (Google-side). Retry after a delay.",
     503: "Gemini service unavailable. Retry after a delay.",
 }
-
-
-def _l2_normalize(vector: List[float]) -> List[float]:
-    """Ensure vector has unit L2 norm. No-op for zero vectors."""
-    norm = math.sqrt(sum(v * v for v in vector))
-    return [v / norm for v in vector] if norm > 0 else vector
 
 
 def _raise_api_error(e: APIError, model: str) -> None:
@@ -155,6 +148,8 @@ class GeminiDenseEmbedder(DenseEmbedderBase):
         self._embed_config = types.EmbedContentConfig(**config_kwargs)
 
     def embed(self, text: str, is_query: bool = False) -> EmbedResult:
+        if not text or not text.strip():
+            return EmbedResult(dense_vector=[0.0] * self._dimension)
         # SDK accepts plain str; converts to REST Parts format internally.
         try:
             result = self.client.models.embed_content(
@@ -162,9 +157,7 @@ class GeminiDenseEmbedder(DenseEmbedderBase):
                 contents=text,
                 config=self._embed_config,
             )
-            vector = _l2_normalize(
-                truncate_and_normalize(list(result.embeddings[0].values), self._dimension)
-            )
+            vector = truncate_and_normalize(list(result.embeddings[0].values), self._dimension)
             return EmbedResult(dense_vector=vector)
         except (APIError, ClientError) as e:
             _raise_api_error(e, self.model_name)
@@ -175,17 +168,28 @@ class GeminiDenseEmbedder(DenseEmbedderBase):
         results: List[EmbedResult] = []
         for i in range(0, len(texts), _TEXT_BATCH_SIZE):
             batch = texts[i : i + _TEXT_BATCH_SIZE]
+            non_empty_indices = [j for j, t in enumerate(batch) if t and t.strip()]
+            empty_indices = [j for j, t in enumerate(batch) if not (t and t.strip())]
+
+            if not non_empty_indices:
+                results.extend(EmbedResult(dense_vector=[0.0] * self._dimension) for _ in batch)
+                continue
+
+            non_empty_texts = [batch[j] for j in non_empty_indices]
             try:
                 response = self.client.models.embed_content(
                     model=self.model_name,
-                    contents=batch,
+                    contents=non_empty_texts,
                     config=self._embed_config,
                 )
-                for emb in response.embeddings:
-                    vector = _l2_normalize(
-                        truncate_and_normalize(list(emb.values), self._dimension)
+                batch_results = [None] * len(batch)
+                for j, emb in zip(non_empty_indices, response.embeddings):
+                    batch_results[j] = EmbedResult(
+                        dense_vector=truncate_and_normalize(list(emb.values), self._dimension)
                     )
-                    results.append(EmbedResult(dense_vector=vector))
+                for j in empty_indices:
+                    batch_results[j] = EmbedResult(dense_vector=[0.0] * self._dimension)
+                results.extend(batch_results)
             except (APIError, ClientError) as e:
                 logger.warning(
                     "Gemini batch embed failed (HTTP %d) for batch of %d, falling back to individual",
@@ -221,9 +225,7 @@ class GeminiDenseEmbedder(DenseEmbedderBase):
                     )
                     results[idx] = [
                         EmbedResult(
-                            dense_vector=_l2_normalize(
-                                truncate_and_normalize(list(emb.values), self._dimension)
-                            )
+                            dense_vector=truncate_and_normalize(list(emb.values), self._dimension)
                         )
                         for emb in response.embeddings
                     ]
