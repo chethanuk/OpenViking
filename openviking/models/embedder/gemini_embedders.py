@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from google import genai
 from google.genai import types
-from google.genai.errors import APIError
+from google.genai.errors import APIError, ClientError
 
 import logging
 
@@ -29,12 +29,45 @@ _TEXT_BATCH_SIZE = 100
 # Maximum input tokens per Gemini embedding request (model hard limit).
 _GEMINI_INPUT_TOKEN_LIMIT = 8192
 
+_VALID_TASK_TYPES: frozenset = frozenset({
+    "RETRIEVAL_QUERY",
+    "RETRIEVAL_DOCUMENT",
+    "SEMANTIC_SIMILARITY",
+    "CLASSIFICATION",
+    "CLUSTERING",
+    "QUESTION_ANSWERING",
+    "FACT_VERIFICATION",
+    "CODE_RETRIEVAL_QUERY",
+})
+
+_ERROR_HINTS: Dict[int, str] = {
+    400: "Invalid request — check model name and task_type value.",
+    401: "Invalid API key. Verify your GOOGLE_API_KEY or api_key in config.",
+    403: "Permission denied. API key may lack access to this model.",
+    404: "Model not found: '{model}'. Check spelling (e.g. 'gemini-embedding-2-preview').",
+    429: "Quota exceeded. Wait and retry, or increase your Google API quota.",
+    500: "Gemini service error (Google-side). Retry after a delay.",
+    503: "Gemini service unavailable. Retry after a delay.",
+}
+
+
+def _raise_api_error(e: APIError, model: str) -> None:
+    hint = _ERROR_HINTS.get(e.code, "")
+    msg = f"Gemini embedding error (HTTP {e.code})"
+    if hint:
+        msg += f": {hint.format(model=model)}"
+    raise RuntimeError(msg) from e
+
 
 class GeminiDenseEmbedder(DenseEmbedderBase):
     """Dense embedder backed by Google's Gemini Embedding 2 model.
 
-    Input token limit: 8,192 tokens per request.
+    Input token limit: 8,192 tokens per request (auto-chunked by base class).
     Output dimension: 128–3072 (recommended: 768, 1536, 3072; default: 3072).
+    Task types: RETRIEVAL_QUERY, RETRIEVAL_DOCUMENT, SEMANTIC_SIMILARITY,
+                CLASSIFICATION, CLUSTERING, QUESTION_ANSWERING,
+                FACT_VERIFICATION, CODE_RETRIEVAL_QUERY.
+    Non-symmetric: use query_param/document_param in EmbeddingModelConfig.
     """
 
     KNOWN_DIMENSIONS: Dict[str, int] = {
@@ -55,6 +88,13 @@ class GeminiDenseEmbedder(DenseEmbedderBase):
         super().__init__(model_name, config)
         if not api_key:
             raise ValueError("Gemini provider requires api_key")
+        if task_type and task_type not in _VALID_TASK_TYPES:
+            raise ValueError(
+                f"Invalid task_type '{task_type}'. "
+                f"Valid values: {', '.join(sorted(_VALID_TASK_TYPES))}"
+            )
+        if dimension is not None and not (128 <= dimension <= 3072):
+            raise ValueError(f"dimension must be between 128 and 3072, got {dimension}")
         self.client = genai.Client(api_key=api_key)
         self.task_type = task_type
         self._dimension = dimension or self.KNOWN_DIMENSIONS.get(model_name, 3072)
@@ -73,8 +113,8 @@ class GeminiDenseEmbedder(DenseEmbedderBase):
             )
             vector = truncate_and_normalize(list(result.embeddings[0].values), self._dimension)
             return EmbedResult(dense_vector=vector)
-        except APIError as e:
-            raise RuntimeError(f"Gemini embedding failed (code={e.code}): {e}") from e
+        except (APIError, ClientError) as e:
+            _raise_api_error(e, self.model_name)
 
     def embed_batch(self, texts: List[str]) -> List[EmbedResult]:
         if not texts:
@@ -91,10 +131,10 @@ class GeminiDenseEmbedder(DenseEmbedderBase):
                 for emb in response.embeddings:
                     vector = truncate_and_normalize(list(emb.values), self._dimension)
                     results.append(EmbedResult(dense_vector=vector))
-            except APIError as e:
+            except (APIError, ClientError) as e:
                 logger.warning(
-                    f"Gemini batch embed failed (code={e.code}) for batch of {len(batch)}, "
-                    "falling back to individual calls"
+                    "Gemini batch embed failed (HTTP %d) for batch of %d, falling back to individual",
+                    e.code, len(batch),
                 )
                 for text in batch:
                     results.append(self.embed(text))
@@ -129,10 +169,10 @@ class GeminiDenseEmbedder(DenseEmbedderBase):
                         )
                         for emb in response.embeddings
                     ]
-                except APIError as e:
+                except (APIError, ClientError) as e:
                     logger.warning(
-                        f"Gemini batch embed failed (code={e.code}) for batch of {len(batch)}, "
-                        "falling back to individual calls"
+                        "Gemini async batch embed failed (HTTP %d) for batch of %d, falling back",
+                        e.code, len(batch),
                     )
                     results[idx] = [
                         await anyio.to_thread.run_sync(self.embed, text) for text in batch
