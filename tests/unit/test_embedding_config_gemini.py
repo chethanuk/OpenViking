@@ -34,6 +34,17 @@ class TestGeminiDimension:
     def test_explicit_dimension_overrides_default(self):
         assert _gcfg(dimension=1536).get_effective_dimension() == 1536
 
+    def test_text_embedding_prefix_defaults_768(self):
+        """text-embedding-* future models default to 768 via prefix rule."""
+        cfg = EmbeddingModelConfig(model="text-embedding-005", provider="gemini", api_key="k")
+        assert cfg.get_effective_dimension() == 768
+
+    def test_future_gemini_model_defaults_3072(self):
+        """Future gemini-embedding-* models default to 3072 via fallback."""
+        for model in ["gemini-embedding-2", "gemini-embedding-2.1", "gemini-embedding-3-preview"]:
+            cfg = EmbeddingModelConfig(model=model, provider="gemini", api_key="k")
+            assert cfg.get_effective_dimension() == 3072
+
 
 class TestGeminiContextRouting:
     @patch("openviking.models.embedder.gemini_embedders.genai.Client")

@@ -52,6 +52,29 @@ class TestGeminiDenseEmbedderInit:
         assert embedder.get_dimension() == 3072
 
     @patch("openviking.models.embedder.gemini_embedders.genai.Client")
+    def test_dimension_1_valid(self, mock_client_class):
+        """API accepts dimension=1 (128 is a quality recommendation, not a hard limit)."""
+        from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
+        embedder = GeminiDenseEmbedder("gemini-embedding-2-preview", api_key="key", dimension=1)
+        assert embedder.get_dimension() == 1
+
+    def test_default_dimension_classmethod_prefix_rule(self):
+        from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
+        assert GeminiDenseEmbedder._default_dimension("gemini-embedding-2") == 3072
+        assert GeminiDenseEmbedder._default_dimension("gemini-embedding-2.1") == 3072
+        assert GeminiDenseEmbedder._default_dimension("gemini-embedding-3-preview") == 3072
+        assert GeminiDenseEmbedder._default_dimension("text-embedding-005") == 768
+        assert GeminiDenseEmbedder._default_dimension("text-embedding-004") == 768  # exact match wins
+        assert GeminiDenseEmbedder._default_dimension("gemini-embedding-2-preview") == 3072  # exact match
+
+    @patch("openviking.models.embedder.gemini_embedders.genai.Client")
+    def test_token_limit_per_model(self, mock_client_class):
+        from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder, _MODEL_TOKEN_LIMITS
+        for model, expected in _MODEL_TOKEN_LIMITS.items():
+            e = GeminiDenseEmbedder(model, api_key="key")
+            assert e._token_limit == expected
+
+    @patch("openviking.models.embedder.gemini_embedders.genai.Client")
     def test_supports_multimodal_false(self, mock_client_class):
         from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
         embedder = GeminiDenseEmbedder("gemini-embedding-2-preview", api_key="key")
@@ -173,17 +196,20 @@ class TestGeminiDenseEmbedderAsyncBatch:
     async def test_async_embed_batch_preserves_order(self, mock_client_class):
         from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
         mock_client = mock_client_class.return_value
+        # Use orthogonal unit vectors so _l2_normalize keeps them distinguishable
         mock_client.aio.models.embed_content = AsyncMock(side_effect=[
-            _make_mock_result([[1.0]]),
-            _make_mock_result([[2.0]]),
-            _make_mock_result([[3.0]]),
+            _make_mock_result([[1.0, 0.0, 0.0]]),
+            _make_mock_result([[0.0, 1.0, 0.0]]),
+            _make_mock_result([[0.0, 0.0, 1.0]]),
         ])
         embedder = GeminiDenseEmbedder(
-            "gemini-embedding-2-preview", api_key="key", dimension=1, max_concurrent_batches=3
+            "gemini-embedding-2-preview", api_key="key", dimension=3, max_concurrent_batches=3
         )
         results = await embedder.async_embed_batch(["a", "b", "c"])
         # Order must match input regardless of task completion order
-        assert [r.dense_vector[0] for r in results] == [1.0, 2.0, 3.0]
+        assert results[0].dense_vector == pytest.approx([1.0, 0.0, 0.0])
+        assert results[1].dense_vector == pytest.approx([0.0, 1.0, 0.0])
+        assert results[2].dense_vector == pytest.approx([0.0, 0.0, 1.0])
 
     @patch("openviking.models.embedder.gemini_embedders.genai.Client")
     @pytest.mark.anyio

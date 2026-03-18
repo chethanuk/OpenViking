@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Gemini Embedding 2 provider using the official google-genai SDK."""
 
+import math
 from typing import Any, Dict, List, Optional
 
 from google import genai
@@ -26,8 +27,15 @@ logger = logging.getLogger("gemini_embedders")
 
 _TEXT_BATCH_SIZE = 100
 
-# Maximum input tokens per Gemini embedding request (model hard limit).
-_GEMINI_INPUT_TOKEN_LIMIT = 8192
+# Keep for backward-compat with existing unit tests that import it
+_GEMINI_INPUT_TOKEN_LIMIT = 8192  # gemini-embedding-2-preview hard limit
+
+# Per-model token limits (Google API hard limits, from official docs)
+_MODEL_TOKEN_LIMITS: Dict[str, int] = {
+    "gemini-embedding-2-preview": 8192,
+    "gemini-embedding-001": 2048,
+}
+_DEFAULT_TOKEN_LIMIT = 2048  # conservative fallback for unknown future models
 
 _VALID_TASK_TYPES: frozenset = frozenset({
     "RETRIEVAL_QUERY",
@@ -51,8 +59,17 @@ _ERROR_HINTS: Dict[int, str] = {
 }
 
 
+def _l2_normalize(vector: List[float]) -> List[float]:
+    """Ensure vector has unit L2 norm. No-op for zero vectors."""
+    norm = math.sqrt(sum(v * v for v in vector))
+    return [v / norm for v in vector] if norm > 0 else vector
+
+
 def _raise_api_error(e: APIError, model: str) -> None:
     hint = _ERROR_HINTS.get(e.code, "")
+    # Gemini returns HTTP 400 (not 401) when the API key is invalid
+    if e.code == 400 and "api key" in str(e).lower():
+        hint = "Invalid API key. Verify your GOOGLE_API_KEY or api_key in config."
     msg = f"Gemini embedding failed (HTTP {e.code})"
     if hint:
         msg += f": {hint.format(model=model)}"
@@ -60,21 +77,48 @@ def _raise_api_error(e: APIError, model: str) -> None:
 
 
 class GeminiDenseEmbedder(DenseEmbedderBase):
-    """Dense embedder backed by Google's Gemini Embedding 2 model.
+    """Dense embedder backed by Google's Gemini Embedding models.
 
-    Input token limit: 8,192 tokens per request (auto-chunked by base class).
-    Output dimension: 1–3072 (recommended: 768, 1536, 3072; default: 3072).
-    Task types: RETRIEVAL_QUERY, RETRIEVAL_DOCUMENT, SEMANTIC_SIMILARITY,
-                CLASSIFICATION, CLUSTERING, QUESTION_ANSWERING,
-                FACT_VERIFICATION, CODE_RETRIEVAL_QUERY.
+    REST endpoint: /v1beta/models/{model}:embedContent (SDK handles Parts format internally).
+    Input token limit: per-model (8192 for gemini-embedding-2-preview, 2048 for gemini-embedding-001).
+    Output dimension: 1–3072 (MRL; recommended 768, 1536, 3072; default 3072).
+    Task types: RETRIEVAL_QUERY, RETRIEVAL_DOCUMENT, SEMANTIC_SIMILARITY, CLASSIFICATION,
+                CLUSTERING, CODE_RETRIEVAL_QUERY, QUESTION_ANSWERING, FACT_VERIFICATION.
     Non-symmetric: use query_param/document_param in EmbeddingModelConfig.
     """
 
+    # Default output dimensions per model (used when user does not specify `dimension`).
+    # gemini-embedding-2-preview: 3072 MRL model — supports 1–3072 via output_dimensionality
+    # gemini-embedding-001:       3072 (native 768-dim vectors; 3072 shown as default for MRL compat)
+    # text-embedding-004:         768  fixed-dim legacy model, does not support MRL truncation
+    # Future gemini-embedding-*:  default 3072 via _default_dimension() fallback
+    # Future text-embedding-*:    default 768  via _default_dimension() prefix rule
     KNOWN_DIMENSIONS: Dict[str, int] = {
         "gemini-embedding-2-preview": 3072,
         "gemini-embedding-001": 3072,
         "text-embedding-004": 768,
     }
+
+    @classmethod
+    def _default_dimension(cls, model: str) -> int:
+        """Return default output dimension for a Gemini model.
+
+        Lookup order:
+        1. Exact match in KNOWN_DIMENSIONS
+        2. Prefix rule: text-embedding-* → 768 (legacy fixed-dim series)
+        3. Fallback: 3072 (gemini-embedding-* MRL models)
+
+        Examples:
+            gemini-embedding-2-preview → 3072 (exact match)
+            gemini-embedding-2         → 3072 (fallback — future model)
+            text-embedding-004         → 768  (exact match)
+            text-embedding-005         → 768  (prefix rule — future model)
+        """
+        if model in cls.KNOWN_DIMENSIONS:
+            return cls.KNOWN_DIMENSIONS[model]
+        if model.startswith("text-embedding-"):
+            return 768
+        return 3072
 
     def __init__(
         self,
@@ -97,7 +141,8 @@ class GeminiDenseEmbedder(DenseEmbedderBase):
             raise ValueError(f"dimension must be between 1 and 3072, got {dimension}")
         self.client = genai.Client(api_key=api_key)
         self.task_type = task_type
-        self._dimension = dimension or self.KNOWN_DIMENSIONS.get(model_name, 3072)
+        self._dimension = dimension or self._default_dimension(model_name)
+        self._token_limit = _MODEL_TOKEN_LIMITS.get(model_name, _DEFAULT_TOKEN_LIMIT)
         self._max_concurrent_batches = max_concurrent_batches
         config_kwargs: Dict[str, Any] = {"output_dimensionality": self._dimension}
         if self.task_type:
@@ -105,13 +150,16 @@ class GeminiDenseEmbedder(DenseEmbedderBase):
         self._embed_config = types.EmbedContentConfig(**config_kwargs)
 
     def embed(self, text: str) -> EmbedResult:
+        # SDK accepts plain str; converts to REST Parts format internally.
         try:
             result = self.client.models.embed_content(
                 model=self.model_name,
                 contents=text,
                 config=self._embed_config,
             )
-            vector = truncate_and_normalize(list(result.embeddings[0].values), self._dimension)
+            vector = _l2_normalize(
+                truncate_and_normalize(list(result.embeddings[0].values), self._dimension)
+            )
             return EmbedResult(dense_vector=vector)
         except (APIError, ClientError) as e:
             _raise_api_error(e, self.model_name)
@@ -129,7 +177,9 @@ class GeminiDenseEmbedder(DenseEmbedderBase):
                     config=self._embed_config,
                 )
                 for emb in response.embeddings:
-                    vector = truncate_and_normalize(list(emb.values), self._dimension)
+                    vector = _l2_normalize(
+                        truncate_and_normalize(list(emb.values), self._dimension)
+                    )
                     results.append(EmbedResult(dense_vector=vector))
             except (APIError, ClientError) as e:
                 logger.warning(
@@ -165,7 +215,9 @@ class GeminiDenseEmbedder(DenseEmbedderBase):
                     )
                     results[idx] = [
                         EmbedResult(
-                            dense_vector=truncate_and_normalize(list(emb.values), self._dimension)
+                            dense_vector=_l2_normalize(
+                                truncate_and_normalize(list(emb.values), self._dimension)
+                            )
                         )
                         for emb in response.embeddings
                     ]

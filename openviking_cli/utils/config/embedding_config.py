@@ -187,7 +187,7 @@ class EmbeddingModelConfig(BaseModel):
 
         if provider == "gemini":
             from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
-            return GeminiDenseEmbedder.KNOWN_DIMENSIONS.get(self.model, 3072)
+            return GeminiDenseEmbedder._default_dimension(self.model)
 
         return 2048
 
