@@ -93,6 +93,8 @@ class GeminiDenseEmbedder(DenseEmbedderBase):
     # text-embedding-004:         768  fixed-dim legacy model, does not support MRL truncation
     # Future gemini-embedding-*:  default 3072 via _default_dimension() fallback
     # Future text-embedding-*:    default 768  via _default_dimension() prefix rule
+    supports_multimodal: bool = False  # text-only; multimodal planned separately
+
     KNOWN_DIMENSIONS: Dict[str, int] = {
         "gemini-embedding-2-preview": 3072,
         "gemini-embedding-001": 3072,

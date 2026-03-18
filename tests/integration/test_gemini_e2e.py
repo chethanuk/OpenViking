@@ -6,30 +6,14 @@ Calls the real Gemini API — requires GOOGLE_API_KEY env var.
 Run: pytest tests/integration/test_gemini_e2e.py -v -m integration
 """
 import math
-import struct
-import zlib
 
 import pytest
 
-from openviking.core.context import ModalContent, Vectorize
 from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
 from tests.integration.conftest import GOOGLE_API_KEY, l2_norm, requires_api_key
 
 pytestmark = [pytest.mark.integration, requires_api_key]
 
-
-def _make_tiny_png() -> bytes:
-    """Create a minimal valid 1x1 white PNG (89 bytes)."""
-
-    def chunk(name, data):
-        c = struct.pack(">I", len(data)) + name + data
-        return c + struct.pack(">I", zlib.crc32(name + data) & 0xFFFFFFFF)
-
-    sig = b"\x89PNG\r\n\x1a\n"
-    ihdr = chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
-    idat = chunk(b"IDAT", zlib.compress(b"\x00\xff\xff\xff"))
-    iend = chunk(b"IEND", b"")
-    return sig + ihdr + idat + iend
 
 
 def _cosine_similarity(a: list, b: list) -> float:
@@ -86,24 +70,6 @@ class TestGeminiE2ETextEmbedding:
         sim_unrelated = _cosine_similarity(r1.dense_vector, r3.dense_vector)
         assert sim_related > sim_unrelated
 
-
-class TestGeminiE2EMultimodalEmbedding:
-    @pytest.mark.xfail(reason="gemini-embedding-2-preview may not support multimodal on free tier")
-    def test_embed_multimodal_image_returns_correct_dimension(self, embedder):
-        v = Vectorize(
-            text="a tiny white pixel",
-            media=ModalContent(mime_type="image/png", uri="test.png", data=_make_tiny_png()),
-        )
-        result = embedder.embed_multimodal(v)
-        assert result.dense_vector is not None
-        assert len(result.dense_vector) == 3072
-
-    def test_multimodal_fallback_on_no_media(self, embedder):
-        v = Vectorize(text="just text, no image")
-        result = embedder.embed_multimodal(v)
-        text_result = embedder.embed("just text, no image")
-        sim = _cosine_similarity(result.dense_vector, text_result.dense_vector)
-        assert sim > 0.99, f"Fallback similarity {sim:.3f} too low"
 
 
 class TestGeminiE2EAsyncBatch:
