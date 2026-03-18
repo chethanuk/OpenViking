@@ -44,6 +44,17 @@
         "input": "multimodal"
     }
   },
+  "embedding_gemini_example": {
+    "_comment": "Gemini alternative for dense embedding:",
+    "dense": {
+        "model": "gemini-embedding-2-preview",
+        "provider": "gemini",
+        "api_key": "${GOOGLE_API_KEY}",
+        "dimension": 1536,
+        "query_param": "RETRIEVAL_QUERY",
+        "document_param": "RETRIEVAL_DOCUMENT"
+    }
+  },
   "embedding_ollama_example": {
     "_comment": "For local deployment with Ollama (no API key required):",
     "dense": {
