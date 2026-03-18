@@ -259,7 +259,7 @@ Create a configuration file `~/.openviking/ov.conf`, remove the comments before 
     "dense": {
       "api_base" : "<api-endpoint>",   // API endpoint address
       "api_key"  : "<your-api-key>",   // Model service API Key
-      "provider" : "<provider-type>",  // Provider type: "volcengine" or "openai" (currently supported)
+      "provider" : "<provider-type>",  // Provider type: "volcengine", "openai", "gemini", "voyage", "jina", or "ollama"
       "dimension": 1024,               // Vector dimension
       "model"    : "<model-name>"      // Embedding model name (e.g., doubao-embedding-vision-250615 or text-embedding-3-large)
     },
@@ -275,7 +275,7 @@ Create a configuration file `~/.openviking/ov.conf`, remove the comments before 
 }
 ```
 
-> **Note**: For embedding models, currently `volcengine` (Doubao), `openai`, and `jina` providers are supported. For VLM models, we support three providers: `volcengine`, `openai`, and `litellm`. The `litellm` provider supports various models including Anthropic (Claude), DeepSeek, Gemini, Moonshot, Zhipu, DashScope, MiniMax, vLLM, Ollama, and more.
+> **Note**: For embedding models, currently `volcengine` (Doubao), `openai`, `gemini`, `voyage`, `jina`, and `ollama` providers are supported. For VLM models, we support three providers: `volcengine`, `openai`, and `litellm`. The `litellm` provider supports various models including Anthropic (Claude), DeepSeek, Gemini, Moonshot, Zhipu, DashScope, MiniMax, vLLM, Ollama, and more.
 
 #### Server Configuration Examples
 
