@@ -48,7 +48,7 @@ class TestGeminiDenseEmbedderInit:
         assert embedder.model_name == "gemini-embedding-2-preview"
         assert embedder.task_type == "RETRIEVAL_DOCUMENT"
         assert embedder.get_dimension() == 1536
-        mock_client_class.assert_called_once_with(api_key="test-key")
+        mock_client_class.assert_called_once()
 
     @patch("openviking.models.embedder.gemini_embedders.genai.Client")
     def test_default_dimension_3072(self, mock_client_class):
@@ -380,3 +380,100 @@ class TestGeminiErrorMessages:
         embedder = GeminiDenseEmbedder("gemini-embedding-2-preview", api_key="k")
         with pytest.raises(RuntimeError, match="HTTP 404"):
             embedder.embed("hello")
+
+
+class TestBuildConfig:
+    @patch("openviking.models.embedder.gemini_embedders.genai.Client")
+    def test_build_config_defaults(self, mock_client_class):
+        from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
+
+        embedder = GeminiDenseEmbedder("gemini-embedding-2-preview", api_key="key", dimension=512)
+        cfg = embedder._build_config()
+        assert cfg.output_dimensionality == 512
+        assert cfg.task_type is None
+        assert cfg.title is None
+
+    @patch("openviking.models.embedder.gemini_embedders.genai.Client")
+    def test_build_config_with_task_type_override(self, mock_client_class):
+        from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
+
+        embedder = GeminiDenseEmbedder(
+            "gemini-embedding-2-preview", api_key="key", dimension=1, task_type="RETRIEVAL_QUERY"
+        )
+        cfg = embedder._build_config(task_type="SEMANTIC_SIMILARITY")
+        assert cfg.task_type == "SEMANTIC_SIMILARITY"
+
+    @patch("openviking.models.embedder.gemini_embedders.genai.Client")
+    def test_build_config_with_title(self, mock_client_class):
+        from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
+
+        embedder = GeminiDenseEmbedder("gemini-embedding-2-preview", api_key="key", dimension=1)
+        cfg = embedder._build_config(title="My Document")
+        assert cfg.title == "My Document"
+
+    @patch("openviking.models.embedder.gemini_embedders.genai.Client")
+    def test_embed_per_call_task_type(self, mock_client_class):
+        from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
+
+        mock_client = mock_client_class.return_value
+        mock_client.models.embed_content.return_value = _make_mock_result([[0.1]])
+        embedder = GeminiDenseEmbedder("gemini-embedding-2-preview", api_key="key", dimension=1)
+        embedder.embed("text", task_type="CLUSTERING")
+        _, kwargs = mock_client.models.embed_content.call_args
+        assert kwargs["config"].task_type == "CLUSTERING"
+
+    @patch("openviking.models.embedder.gemini_embedders.genai.Client")
+    def test_embed_per_call_title(self, mock_client_class):
+        from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
+
+        mock_client = mock_client_class.return_value
+        mock_client.models.embed_content.return_value = _make_mock_result([[0.1]])
+        embedder = GeminiDenseEmbedder("gemini-embedding-2-preview", api_key="key", dimension=1)
+        embedder.embed("text", title="Doc Title")
+        _, kwargs = mock_client.models.embed_content.call_args
+        assert kwargs["config"].title == "Doc Title"
+
+    @patch("openviking.models.embedder.gemini_embedders.genai.Client")
+    def test_embed_batch_with_titles_falls_back(self, mock_client_class):
+        from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
+
+        mock_client = mock_client_class.return_value
+        mock_client.models.embed_content.side_effect = [
+            _make_mock_result([[0.1]]),
+            _make_mock_result([[0.2]]),
+        ]
+        embedder = GeminiDenseEmbedder("gemini-embedding-2-preview", api_key="key", dimension=1)
+        results = embedder.embed_batch(["alpha", "beta"], titles=["Title A", "Title B"])
+        assert len(results) == 2
+        # Called once per item (not as a batch)
+        assert mock_client.models.embed_content.call_count == 2
+        # First call should have title="Title A"
+        first_cfg = mock_client.models.embed_content.call_args_list[0][1]["config"]
+        assert first_cfg.title == "Title A"
+
+    @patch("openviking.models.embedder.gemini_embedders.genai.Client")
+    def test_repr(self, mock_client_class):
+        from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
+
+        embedder = GeminiDenseEmbedder(
+            "gemini-embedding-2-preview", api_key="key", dimension=768, task_type="RETRIEVAL_DOCUMENT"
+        )
+        r = repr(embedder)
+        assert "GeminiDenseEmbedder(" in r
+        assert "gemini-embedding-2-preview" in r
+        assert "768" in r
+        assert "RETRIEVAL_DOCUMENT" in r
+
+    @patch("openviking.models.embedder.gemini_embedders.genai.Client")
+    def test_client_constructed_with_retry_options(self, mock_client_class):
+        from openviking.models.embedder.gemini_embedders import (
+            GeminiDenseEmbedder,
+            _HTTP_RETRY_AVAILABLE,
+        )
+
+        GeminiDenseEmbedder("gemini-embedding-2-preview", api_key="key")
+        mock_client_class.assert_called_once()
+        call_kwargs = mock_client_class.call_args[1]
+        assert call_kwargs.get("api_key") == "key"
+        if _HTTP_RETRY_AVAILABLE:
+            assert "http_options" in call_kwargs

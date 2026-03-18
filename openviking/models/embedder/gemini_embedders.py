@@ -8,6 +8,13 @@ from google import genai
 from google.genai import types
 from google.genai.errors import APIError, ClientError
 
+try:
+    from google.genai.types import HttpOptions, HttpRetryOptions
+
+    _HTTP_RETRY_AVAILABLE = True
+except ImportError:
+    _HTTP_RETRY_AVAILABLE = False
+
 import logging
 
 try:
@@ -137,17 +144,56 @@ class GeminiDenseEmbedder(DenseEmbedderBase):
             )
         if dimension is not None and not (1 <= dimension <= 3072):
             raise ValueError(f"dimension must be between 1 and 3072, got {dimension}")
-        self.client = genai.Client(api_key=api_key)
+        if _HTTP_RETRY_AVAILABLE:
+            self.client = genai.Client(
+                api_key=api_key,
+                http_options=HttpOptions(
+                    retry_options=HttpRetryOptions(
+                        attempts=3,
+                        initial_delay=1.0,
+                        max_delay=30.0,
+                        exp_base=2.0,
+                    )
+                ),
+            )
+        else:
+            self.client = genai.Client(api_key=api_key)
         self.task_type = task_type
         self._dimension = dimension or self._default_dimension(model_name)
         self._token_limit = _MODEL_TOKEN_LIMITS.get(model_name, _DEFAULT_TOKEN_LIMIT)
         self._max_concurrent_batches = max_concurrent_batches
-        config_kwargs: Dict[str, Any] = {"output_dimensionality": self._dimension}
-        if self.task_type:
-            config_kwargs["task_type"] = self.task_type
-        self._embed_config = types.EmbedContentConfig(**config_kwargs)
 
-    def embed(self, text: str, is_query: bool = False) -> EmbedResult:
+    def _build_config(
+        self,
+        *,
+        task_type: Optional[str] = None,
+        title: Optional[str] = None,
+    ) -> types.EmbedContentConfig:
+        """Build EmbedContentConfig, merging per-call overrides with instance defaults."""
+        effective_task_type = task_type or self.task_type
+        kwargs: Dict[str, Any] = {"output_dimensionality": self._dimension}
+        if effective_task_type:
+            kwargs["task_type"] = effective_task_type.upper()
+        if title:
+            kwargs["title"] = title
+        return types.EmbedContentConfig(**kwargs)
+
+    def __repr__(self) -> str:
+        return (
+            f"GeminiDenseEmbedder("
+            f"model={self.model_name!r}, "
+            f"dim={self._dimension}, "
+            f"task_type={self.task_type!r})"
+        )
+
+    def embed(
+        self,
+        text: str,
+        is_query: bool = False,
+        *,
+        task_type: Optional[str] = None,
+        title: Optional[str] = None,
+    ) -> EmbedResult:
         if not text or not text.strip():
             return EmbedResult(dense_vector=[0.0] * self._dimension)
         # SDK accepts plain str; converts to REST Parts format internally.
@@ -155,17 +201,31 @@ class GeminiDenseEmbedder(DenseEmbedderBase):
             result = self.client.models.embed_content(
                 model=self.model_name,
                 contents=text,
-                config=self._embed_config,
+                config=self._build_config(task_type=task_type, title=title),
             )
             vector = truncate_and_normalize(list(result.embeddings[0].values), self._dimension)
             return EmbedResult(dense_vector=vector)
         except (APIError, ClientError) as e:
             _raise_api_error(e, self.model_name)
 
-    def embed_batch(self, texts: List[str], is_query: bool = False) -> List[EmbedResult]:
+    def embed_batch(
+        self,
+        texts: List[str],
+        is_query: bool = False,
+        *,
+        task_type: Optional[str] = None,
+        titles: Optional[List[str]] = None,
+    ) -> List[EmbedResult]:
         if not texts:
             return []
+        # When titles are provided, delegate per-item (titles are per-document metadata).
+        if titles is not None:
+            return [
+                self.embed(text, is_query=is_query, task_type=task_type, title=title)
+                for text, title in zip(texts, titles)
+            ]
         results: List[EmbedResult] = []
+        config = self._build_config(task_type=task_type)
         for i in range(0, len(texts), _TEXT_BATCH_SIZE):
             batch = texts[i : i + _TEXT_BATCH_SIZE]
             non_empty_indices = [j for j, t in enumerate(batch) if t and t.strip()]
@@ -180,7 +240,7 @@ class GeminiDenseEmbedder(DenseEmbedderBase):
                 response = self.client.models.embed_content(
                     model=self.model_name,
                     contents=non_empty_texts,
-                    config=self._embed_config,
+                    config=config,
                 )
                 batch_results = [None] * len(batch)
                 for j, emb in zip(non_empty_indices, response.embeddings):
@@ -221,7 +281,7 @@ class GeminiDenseEmbedder(DenseEmbedderBase):
             async with sem:
                 try:
                     response = await self.client.aio.models.embed_content(
-                        model=self.model_name, contents=batch, config=self._embed_config
+                        model=self.model_name, contents=batch, config=self._build_config()
                     )
                     results[idx] = [
                         EmbedResult(
