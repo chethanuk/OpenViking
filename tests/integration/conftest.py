@@ -7,14 +7,18 @@ Automatically starts an OpenViking server in a background thread so that
 AsyncHTTPClient integration tests can run without a manually started server process.
 """
 
+import math
+import os
 import shutil
 import socket
 import threading
 import time
 from pathlib import Path
+from typing import Optional
 
 import httpx
 import pytest
+import pytest_asyncio
 import uvicorn
 
 from openviking.server.app import create_app
@@ -79,3 +83,108 @@ def server_url(temp_dir):
     thread.join(timeout=5)
     loop.run_until_complete(svc.close())
     loop.close()
+
+
+# ── Gemini shared fixtures and helpers ────────────────────────────────────────
+
+GOOGLE_API_KEY: Optional[str] = os.environ.get("GOOGLE_API_KEY")
+
+# (model_name, default_dim, token_limit) — for @pytest.mark.parametrize("model,dim,limit", ...)
+GEMINI_MODELS = [
+    pytest.param("gemini-embedding-2-preview", 3072, 8192, id="g2p"),
+    pytest.param("gemini-embedding-001",       3072, 2048, id="g001"),
+]
+
+# Wrapped single-value tuples — for fixture params (request.param is the whole tuple)
+GEMINI_MODELS_FIXTURE = [
+    pytest.param(("gemini-embedding-2-preview", 3072, 8192), id="g2p"),
+    pytest.param(("gemini-embedding-001",       3072, 2048), id="g001"),
+]
+
+# (model_name, dimension) pairs for OpenViking client fixtures
+EMBED_PARAMS = [
+    pytest.param(("gemini-embedding-2-preview", 512),  id="g2p-512"),
+    pytest.param(("gemini-embedding-2-preview", 768),  id="g2p-768"),
+    pytest.param(("gemini-embedding-2-preview", 1536), id="g2p-1536"),
+    pytest.param(("gemini-embedding-2-preview", 3072), id="g2p-3072"),
+    pytest.param(("gemini-embedding-001",       768),  id="g001-768"),
+]
+
+
+def l2_norm(vec) -> float:
+    return math.sqrt(sum(v * v for v in vec))
+
+
+def vectordb_engine_available() -> bool:
+    try:
+        from openviking.storage.vectordb.engine import PersistStore, VolatileStore
+        return isinstance(PersistStore, type) and isinstance(VolatileStore, type)
+    except Exception:
+        return False
+
+
+def sample_markdown(tmp_dir: Path, slug: str, content: str) -> Path:
+    p = tmp_dir / f"{slug}.md"
+    p.write_text(content, encoding="utf-8")
+    return p
+
+
+def gemini_config_dict(
+    model: str, dim: int,
+    query_param: Optional[str] = None,
+    doc_param: Optional[str] = None,
+    task_type: Optional[str] = None,
+) -> dict:
+    dense: dict = {"provider": "gemini", "model": model, "api_key": GOOGLE_API_KEY, "dimension": dim}
+    if query_param:
+        dense["query_param"] = query_param
+    if doc_param:
+        dense["document_param"] = doc_param
+    if task_type:
+        dense["task_type"] = task_type
+    return {"embedding": {"dense": dense}, "storage": {"agfs": {"mode": "binding-client"}}}
+
+
+async def make_ov_client(config_dict: dict, data_path: str):
+    from openviking.async_client import AsyncOpenViking
+    from openviking_cli.utils.config.open_viking_config import OpenVikingConfigSingleton
+    await AsyncOpenViking.reset()
+    OpenVikingConfigSingleton.reset_instance()
+    OpenVikingConfigSingleton.initialize(config_dict=config_dict)
+    client = AsyncOpenViking(path=data_path)
+    await client.initialize()
+    return client
+
+
+async def teardown_ov_client():
+    from openviking.async_client import AsyncOpenViking
+    from openviking_cli.utils.config.open_viking_config import OpenVikingConfigSingleton
+    await AsyncOpenViking.reset()
+    OpenVikingConfigSingleton.reset_instance()
+
+
+requires_api_key = pytest.mark.skipif(not GOOGLE_API_KEY, reason="GOOGLE_API_KEY not set")
+requires_engine = pytest.mark.skipif(
+    not vectordb_engine_available(),
+    reason="VectorDB native engine not compiled — run: pip install -e . --no-build-isolation",
+)
+
+
+@pytest.fixture(scope="module", params=GEMINI_MODELS_FIXTURE)
+def gemini_embedder(request):
+    """Module-scoped GeminiDenseEmbedder at dim=768, parametrized over known models."""
+    from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
+    model_name, _, _ = request.param
+    return GeminiDenseEmbedder(model_name, api_key=GOOGLE_API_KEY, dimension=768)
+
+
+@pytest_asyncio.fixture(params=EMBED_PARAMS)
+async def gemini_ov_client(request, tmp_path):
+    """AsyncOpenViking client backed by Gemini; yields (client, model, dim)."""
+    model, dim = request.param
+    data_path = str(tmp_path / "ov_data")
+    Path(data_path).mkdir(parents=True, exist_ok=True)
+
+    client = await make_ov_client(gemini_config_dict(model, dim), data_path)
+    yield client, model, dim
+    await teardown_ov_client()
