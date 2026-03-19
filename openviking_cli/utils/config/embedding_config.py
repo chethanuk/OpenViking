@@ -187,6 +187,10 @@ class EmbeddingModelConfig(BaseModel):
             if not self.api_key:
                 raise ValueError("Voyage provider requires 'api_key' to be set")
 
+        elif self.provider == "minimax":
+            if not self.api_key:
+                raise ValueError("MiniMax provider requires 'api_key' to be set")
+
         return self
 
     def get_effective_dimension(self) -> int:
@@ -266,6 +270,7 @@ class EmbeddingConfig(BaseModel):
         """
         from openviking.models.embedder import (
             JinaDenseEmbedder,
+            MinimaxDenseEmbedder,
             OpenAIDenseEmbedder,
             VikingDBDenseEmbedder,
             VikingDBHybridEmbedder,
@@ -405,6 +410,18 @@ class EmbeddingConfig(BaseModel):
                     "api_key": cfg.api_key,
                     "api_base": cfg.api_base,
                     "dimension": cfg.dimension,
+                },
+            ),
+            ("minimax", "dense"): (
+                MinimaxDenseEmbedder,
+                lambda cfg: {
+                    "model_name": cfg.model,
+                    "api_key": cfg.api_key,
+                    "api_base": cfg.api_base,
+                    "dimension": cfg.dimension,
+                    **({"query_param": cfg.query_param} if cfg.query_param else {}),
+                    **({"document_param": cfg.document_param} if cfg.document_param else {}),
+                    **({"extra_headers": cfg.extra_headers} if cfg.extra_headers else {}),
                 },
             ),
         }

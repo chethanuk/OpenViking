@@ -26,6 +26,7 @@ from openviking.models.embedder.base import (
 )
 from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
 from openviking.models.embedder.jina_embedders import JinaDenseEmbedder
+from openviking.models.embedder.minimax_embedders import MinimaxDenseEmbedder
 from openviking.models.embedder.openai_embedders import OpenAIDenseEmbedder
 from openviking.models.embedder.vikingdb_embedders import (
     VikingDBDenseEmbedder,
@@ -51,6 +52,8 @@ __all__ = [
     "GeminiDenseEmbedder",
     # Jina AI implementations
     "JinaDenseEmbedder",
+    # MiniMax implementations
+    "MinimaxDenseEmbedder",
     # OpenAI implementations
     "OpenAIDenseEmbedder",
     # Voyage implementations
