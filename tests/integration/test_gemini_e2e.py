@@ -6,8 +6,6 @@ Calls the real Gemini API — requires GOOGLE_API_KEY env var.
 Run: pytest tests/integration/test_gemini_e2e.py -v -m integration
 """
 
-import math
-
 import pytest
 
 from openviking.models.embedder.gemini_embedders import GeminiDenseEmbedder
