@@ -95,6 +95,10 @@ class EmbeddingModelConfig(BaseModel):
                 value = data.get(key)
                 if isinstance(value, str):
                     data[key] = value.lower()
+            for key in ("task_type", "query_param", "document_param"):
+                value = data.get(key)
+                if isinstance(value, str):
+                    data[key] = value.upper()
         return data
 
     @model_validator(mode="after")

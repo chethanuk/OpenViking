@@ -109,3 +109,12 @@ class TestGeminiConfigValidation:
             "CODE_RETRIEVAL_QUERY",
         ]:
             _gcfg(task_type=t)  # must not raise
+
+    def test_gemini_task_type_case_insensitive(self):
+        """Lowercase task_type/query_param/document_param should be auto-uppercased."""
+        cfg = _gcfg(task_type="retrieval_document")
+        assert cfg.task_type == "RETRIEVAL_DOCUMENT"
+
+        cfg2 = _gcfg(query_param="retrieval_query", document_param="retrieval_document")
+        assert cfg2.query_param == "RETRIEVAL_QUERY"
+        assert cfg2.document_param == "RETRIEVAL_DOCUMENT"

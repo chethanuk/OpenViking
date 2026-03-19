@@ -195,6 +195,7 @@ class GeminiDenseEmbedder(DenseEmbedderBase):
         title: Optional[str] = None,
     ) -> EmbedResult:
         if not text or not text.strip():
+            logger.warning("Empty text passed to embed(), returning zero vector")
             return EmbedResult(dense_vector=[0.0] * self._dimension)
         # SDK accepts plain str; converts to REST Parts format internally.
         try:
