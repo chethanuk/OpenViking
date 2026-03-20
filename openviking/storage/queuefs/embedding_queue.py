@@ -48,7 +48,8 @@ class EmbeddingQueue(NamedQueue):
         # Otherwise try to convert directly from dict
         try:
             return EmbeddingMsg.from_dict(data_dict)
-        except Exception:
+        except Exception as e:
+            logger.error(f"[EmbeddingQueue] dequeue() failed to parse message: {e}", exc_info=True)
             return None
 
     async def peek(self) -> Optional[EmbeddingMsg]:
@@ -61,15 +62,22 @@ class EmbeddingQueue(NamedQueue):
             if isinstance(data_dict["data"], str):
                 try:
                     return EmbeddingMsg.from_json(data_dict["data"])
-                except Exception:
+                except Exception as e:
+                    logger.error(
+                        f"[EmbeddingQueue] peek() failed to parse JSON data: {e}", exc_info=True
+                    )
                     return None
             elif isinstance(data_dict["data"], dict):
                 try:
                     return EmbeddingMsg.from_dict(data_dict["data"])
-                except Exception:
+                except Exception as e:
+                    logger.error(
+                        f"[EmbeddingQueue] peek() failed to parse dict data: {e}", exc_info=True
+                    )
                     return None
 
         try:
             return EmbeddingMsg.from_dict(data_dict)
-        except Exception:
+        except Exception as e:
+            logger.error(f"[EmbeddingQueue] peek() failed to parse message: {e}", exc_info=True)
             return None
