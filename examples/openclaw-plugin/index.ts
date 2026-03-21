@@ -413,6 +413,12 @@ const contextEnginePlugin = {
     const resolveAgentId = (sessionId: string): string =>
       sessionAgentIds.get(sessionId) ?? cfg.agentId;
 
+    // Version cache for recall skip optimization (#817)
+    // Key: `${sessionId}:${targetUri}`, Value: last-seen memory_version
+    // Keyed by sessionId to prevent cross-session cache poisoning.
+    const _memoryVersionCache = new Map<string, number>();
+    const _lastInjectedContext = new Map<string, string>();
+
     api.on("session_start", async (_event: unknown, ctx?: HookAgentContext) => {
       rememberSessionAgentId(ctx ?? {});
     });
@@ -447,6 +453,34 @@ const contextEnginePlugin = {
       if (!queryText) {
         return;
       }
+
+      // ── STEP 1: Hoisted variables (declared before guard, used in update block) ─
+      let _userVersion: number | null = null;
+      let _agentVersion: number | null = null;
+      const _userCacheKey = hookSessionId ? `${hookSessionId}:viking://user/memories` : '';
+      const _agentCacheKey = hookSessionId ? `${hookSessionId}:viking://agent/memories` : '';
+
+      // ── STEP 2: Version check guard ───────────────────────────────────────────────
+      // If hookSessionId is empty, skip optimization → fall through to unconditional find().
+      if (hookSessionId && cfg.autoRecall) {
+        [_userVersion, _agentVersion] = await Promise.all([
+          client.getMemoryVersion("viking://user/memories"),
+          client.getMemoryVersion("viking://agent/memories"),
+        ]);
+
+        const userUnchanged = _userVersion !== null && _memoryVersionCache.get(_userCacheKey) === _userVersion;
+        const agentUnchanged = _agentVersion !== null && _memoryVersionCache.get(_agentCacheKey) === _agentVersion;
+
+        if (userUnchanged && agentUnchanged) {
+          const cached = _lastInjectedContext.get(hookSessionId);
+          // Check !== undefined: "" (empty string) is a valid prior result (no memories found)
+          // undefined means we've never built context for this session → must run recall
+          if (cached !== undefined) {
+            return { prependContext: cached };
+          }
+        }
+      }
+      // Fall through: cache miss, version changed, null version, or no sessionId
 
       const prependContextParts: string[] = [];
 
@@ -549,6 +583,14 @@ const contextEnginePlugin = {
               "</ingest-reply-assist>",
           );
         }
+      }
+
+      // ── STEP 3: Update version cache after successful recall ──────────────────────
+      if (hookSessionId) {
+        if (_userVersion !== null) _memoryVersionCache.set(_userCacheKey, _userVersion);
+        if (_agentVersion !== null) _memoryVersionCache.set(_agentCacheKey, _agentVersion);
+        // Store injected context. "" (no memories) is stored too so next call returns early.
+        _lastInjectedContext.set(hookSessionId, prependContextParts.join('\n\n'));
       }
 
       if (prependContextParts.length > 0) {
