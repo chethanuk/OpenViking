@@ -134,3 +134,48 @@ def test_memory_chunk_config_custom():
     config = SemanticConfig(memory_chunk_chars=500, memory_chunk_overlap=50)
     assert config.memory_chunk_chars == 500
     assert config.memory_chunk_overlap == 50
+
+
+# --- Custom prompt template field tests (#578) ---
+
+
+def test_custom_prompt_fields_default_none():
+    """All 4 custom prompt fields default to None."""
+    config = SemanticConfig()
+    assert config.document_summary_prompt is None
+    assert config.code_summary_prompt is None
+    assert config.file_summary_prompt is None
+    assert config.overview_prompt is None
+
+
+def test_custom_prompt_fields_accept_valid_template():
+    """Valid Jinja2 templates are accepted without error."""
+    config = SemanticConfig(
+        document_summary_prompt="Summarize {{ file_name }}: {{ content }}",
+        code_summary_prompt="Explain code {{ file_name }}: {{ content }}",
+        file_summary_prompt="File {{ file_name }}: {{ content }}",
+        overview_prompt="Overview {{ dir_name }}: {{ file_summaries }} {{ children_abstracts }}",
+    )
+    assert config.document_summary_prompt is not None
+    assert config.code_summary_prompt is not None
+
+
+def test_custom_prompt_field_syntax_error_raises():
+    """A Jinja2 syntax error in any field raises ValueError with field name."""
+    import pytest
+
+    with pytest.raises(ValueError) as exc_info:
+        SemanticConfig(document_summary_prompt="{{ unclosed")
+    assert "document_summary_prompt" in str(exc_info.value)
+    assert "syntax" in str(exc_info.value).lower()
+
+
+def test_custom_prompt_missing_required_var_raises():
+    """A template missing a required variable raises ValueError with var name."""
+    import pytest
+
+    with pytest.raises(ValueError) as exc_info:
+        SemanticConfig(document_summary_prompt="Summarize the file please.")
+    assert "document_summary_prompt" in str(exc_info.value)
+    error_msg = str(exc_info.value)
+    assert "file_name" in error_msg or "content" in error_msg
