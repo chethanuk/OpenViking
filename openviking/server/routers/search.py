@@ -11,6 +11,7 @@ from openviking.server.auth import get_request_context
 from openviking.server.dependencies import get_service
 from openviking.server.identity import RequestContext
 from openviking.server.models import Response
+from openviking.server.namespace_versions import get_namespace_version_service
 from openviking.server.telemetry import run_operation
 from openviking.telemetry import TelemetryRequest
 
@@ -82,10 +83,34 @@ async def find(
     result = execution.result
     if hasattr(result, "to_dict"):
         result = result.to_dict()
+    # Inject memory_version (additive field — old clients ignore it) (#817)
+    ns_svc = get_namespace_version_service()
+    ns_key = f"{_ctx.account_id}:{_ctx.user.user_id}:{request.target_uri}"
+    result["memory_version"] = await ns_svc.get(ns_key)
     return Response(
         status="ok",
         result=result,
         telemetry=execution.telemetry,
+    ).model_dump(exclude_none=True)
+
+
+@router.get("/version")
+async def get_namespace_version(
+    target_uri: str = "",
+    _ctx: RequestContext = Depends(get_request_context),
+):
+    """Return current memory_version for target_uri.
+
+    O(1) in-memory lookup — no search, no embedding, no DB query.
+    Returns memory_version=0 for unknown namespaces (not 404).
+    See: https://github.com/volcengine/OpenViking/issues/817
+    """
+    ns_svc = get_namespace_version_service()
+    ns_key = f"{_ctx.account_id}:{_ctx.user.user_id}:{target_uri}"
+    version = await ns_svc.get(ns_key)
+    return Response(
+        status="ok",
+        result={"memory_version": version},
     ).model_dump(exclude_none=True)
 
 

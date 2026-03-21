@@ -335,6 +335,7 @@ class FindResult:
     query_plan: Optional[QueryPlan] = None
     query_results: Optional[List[QueryResult]] = None
     total: int = 0
+    memory_version: Optional[int] = None  # per-namespace write counter (#817)
 
     def __iter__(self):
         """Make FindResult iterable by yielding all matched contexts."""
@@ -359,6 +360,9 @@ class FindResult:
                 "reasoning": self.query_plan.reasoning,
                 "queries": [self._query_to_dict(q) for q in self.query_plan.queries],
             }
+
+        if self.memory_version is not None:
+            result["memory_version"] = self.memory_version
 
         return result
 

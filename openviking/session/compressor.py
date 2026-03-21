@@ -13,6 +13,7 @@ from typing import Dict, List, Optional
 from openviking.core.context import Context, Vectorize
 from openviking.message import Message
 from openviking.server.identity import RequestContext
+from openviking.server.namespace_versions import get_namespace_version_service
 from openviking.storage import VikingDBManager
 from openviking.storage.viking_fs import get_viking_fs
 from openviking.telemetry import get_current_telemetry
@@ -522,6 +523,12 @@ class SessionCompressor:
 
                 with telemetry.measure("memory.extract.stage.flush_semantic"):
                     await self._flush_semantic_operations(ctx)
+
+                if stats.created + stats.merged + stats.deleted > 0:
+                    _ns_svc = get_namespace_version_service()
+                    await _ns_svc.increment(
+                        f"{ctx.account_id}:{ctx.user.user_id}:viking://user/memories"
+                    )
 
                 telemetry.set("memory.extract.created", stats.created)
                 telemetry.set("memory.extract.merged", stats.merged)

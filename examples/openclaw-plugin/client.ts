@@ -242,6 +242,25 @@ export class OpenVikingClient {
     });
   }
 
+  /**
+   * Return the current memory_version for a namespace.
+   * Returns null on any error (404, network failure, server too old) —
+   * callers MUST fall back to full recall when null is returned.
+   *
+   * Issue #817: cache-friendly recall optimization.
+   */
+  async getMemoryVersion(namespace: string): Promise<number | null> {
+    try {
+      const normalizedNs = await this.normalizeTargetUri(namespace);
+      const result = await this.request<{ memory_version: number }>(
+        `/api/v1/search/version?target_uri=${encodeURIComponent(normalizedNs)}`,
+      );
+      return typeof result.memory_version === 'number' ? result.memory_version : null;
+    } catch {
+      return null;
+    }
+  }
+
   async read(uri: string): Promise<string> {
     return this.request<string>(
       `/api/v1/content/read?uri=${encodeURIComponent(uri)}`,

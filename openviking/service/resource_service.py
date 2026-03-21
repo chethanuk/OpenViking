@@ -11,6 +11,7 @@ import time
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from openviking.server.identity import RequestContext
+from openviking.server.namespace_versions import get_namespace_version_service
 from openviking.storage import VikingDBManager
 from openviking.storage.queuefs import get_queue_manager
 from openviking.storage.viking_fs import VikingFS
@@ -190,6 +191,11 @@ class ResourceService:
                 summarize=summarize,
                 **kwargs,
             )
+
+            target_uri = result.get("root_uri") or to or ""
+            if target_uri:
+                _ns_svc = get_namespace_version_service()
+                await _ns_svc.increment(f"{ctx.account_id}:{ctx.user.user_id}:{target_uri}")
 
             if wait:
                 qm = get_queue_manager()
@@ -395,6 +401,11 @@ class ResourceService:
             viking_fs=self._viking_fs,
             ctx=ctx,
         )
+
+        skill_uri = result.get("root_uri") or ""
+        if skill_uri:
+            _ns_svc = get_namespace_version_service()
+            await _ns_svc.increment(f"{ctx.account_id}:{ctx.user.user_id}:{skill_uri}")
 
         if wait:
             qm = get_queue_manager()
