@@ -104,3 +104,36 @@ async def test_embedding_handler_treats_shutdown_write_lock_as_success(monkeypat
     assert embedder.calls == 1
     assert status["success"] == 1
     assert status["error"] == 0
+
+
+@pytest.mark.asyncio
+async def test_embedding_handler_missing_data_key_logs_error(monkeypatch):
+    """on_dequeue() must log an error and return None when 'data' key is missing."""
+
+    class _DummyVikingDB:
+        is_closing = False
+        has_queue_manager = False
+
+        async def upsert(self, _data, *, ctx):  # pragma: no cover
+            raise AssertionError("upsert must not be called")
+
+    embedder = _DummyEmbedder()
+    monkeypatch.setattr(
+        "openviking_cli.utils.config.get_openviking_config",
+        lambda: _DummyConfig(embedder),
+    )
+
+    handler = TextEmbeddingHandler(_DummyVikingDB())
+    error_calls = []
+    handler.set_callbacks(
+        on_success=lambda: None,
+        on_error=lambda msg, data=None: error_calls.append(msg),
+    )
+
+    # Message dict WITHOUT "data" key
+    bad_payload = {"id": "msg-bad", "message": "orphaned field"}
+    result = await handler.on_dequeue(bad_payload)
+
+    assert result is None
+    assert len(error_calls) == 1, "report_error must be called for malformed message"
+    assert embedder.calls == 0, "embedder must not be called for malformed message"

@@ -215,7 +215,24 @@ class TextEmbeddingHandler(DequeueHandlerBase):
         embedding_msg: Optional[EmbeddingMsg] = None
         collector = None
         try:
-            queue_data = json.loads(data["data"])
+            if "data" not in data:
+                logger.error(
+                    f"[TextEmbeddingHandler] on_dequeue: missing 'data' key in message: {data!r}",
+                    exc_info=True,
+                )
+                self.report_error("Missing 'data' key in embedding queue message", data)
+                return None
+            raw = data["data"]
+            if isinstance(raw, str):
+                queue_data = json.loads(raw)
+            elif isinstance(raw, dict):
+                queue_data = raw
+            else:
+                logger.error(
+                    f"[TextEmbeddingHandler] on_dequeue: unexpected 'data' type {type(raw).__name__!r}: {data!r}",
+                )
+                self.report_error("Invalid 'data' type in embedding queue message", data)
+                return None
             # Parse EmbeddingMsg from data
             embedding_msg = EmbeddingMsg.from_dict(queue_data)
             inserted_data = embedding_msg.context_data
