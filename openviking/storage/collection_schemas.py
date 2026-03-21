@@ -29,6 +29,26 @@ from openviking_cli.utils.config.open_viking_config import OpenVikingConfig
 
 logger = get_logger(__name__)
 
+_MAX_EMBED_RETRIES = 3
+_EMBED_RETRY_BASE_SECS = 1.0  # sleeps: attempt 0→1s, attempt 1→2s; attempt 2 is final (no sleep)
+
+
+def is_retryable_embed_error(exc: Exception) -> bool:
+    """Return True for transient connection/timeout errors that should be retried inline.
+
+    NOTE: 429/rate-limit is intentionally excluded here — it uses the existing
+    re-enqueue path (is_429_error) so it is not double-retried.
+    """
+    msg = str(exc).lower()
+    return (
+        isinstance(exc, (ConnectionError, TimeoutError))
+        or "timeout" in msg
+        or "503" in msg
+        or "502" in msg
+        or "connection" in msg
+        or "temporarily unavailable" in msg
+    )
+
 
 @dataclass
 class RequestQueueStats:
@@ -262,17 +282,40 @@ class TextEmbeddingHandler(DequeueHandlerBase):
 
                 # Generate embedding vector(s)
                 if self._embedder:
-                    try:
-                        # embed() is a blocking HTTP call; offload to thread pool to avoid
-                        # blocking the event loop and allow real concurrency.
-                        result: EmbedResult = await asyncio.to_thread(
-                            self._embedder.embed, embedding_msg.message
-                        )
-                    except Exception as embed_err:
-                        error_msg = f"Failed to generate embedding: {embed_err}"
-                        logger.error(error_msg)
+                    result: EmbedResult | None = None
+                    last_embed_err: Exception | None = None
+                    for attempt in range(_MAX_EMBED_RETRIES):
+                        try:
+                            # embed() is a blocking HTTP call; offload to thread pool to avoid
+                            # blocking the event loop and allow real concurrency.
+                            result = await asyncio.to_thread(
+                                self._embedder.embed, embedding_msg.message
+                            )
+                            break  # success — exit retry loop
+                        except Exception as embed_err:
+                            last_embed_err = embed_err
+                            if (
+                                is_retryable_embed_error(embed_err)
+                                and attempt < _MAX_EMBED_RETRIES - 1
+                            ):
+                                wait = _EMBED_RETRY_BASE_SECS * (2**attempt)
+                                logger.warning(
+                                    f"[TextEmbeddingHandler] Transient embedding error "
+                                    f"(attempt {attempt + 1}/{_MAX_EMBED_RETRIES}), "
+                                    f"retrying in {wait:.1f}s: {embed_err}",
+                                )
+                                await asyncio.sleep(wait)
+                            else:
+                                break  # non-retryable or exhausted — exit retry loop
 
-                        if is_429_error(embed_err) and self._vikingdb.has_queue_manager:
+                    if result is None:
+                        error_msg = (
+                            f"Failed to generate embedding after {_MAX_EMBED_RETRIES} attempts: "
+                            f"{last_embed_err}"
+                        )
+                        logger.error(error_msg, exc_info=True)
+
+                        if is_429_error(last_embed_err) and self._vikingdb.has_queue_manager:
                             try:
                                 await self._vikingdb.enqueue_embedding_msg(embedding_msg)
                                 logger.info(
