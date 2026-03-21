@@ -104,3 +104,124 @@ async def test_embedding_handler_treats_shutdown_write_lock_as_success(monkeypat
     assert embedder.calls == 1
     assert status["success"] == 1
     assert status["error"] == 0
+
+
+@pytest.mark.asyncio
+async def test_embedding_handler_missing_data_key_logs_error(monkeypatch):
+    """on_dequeue() must log an error and return None when 'data' key is missing."""
+
+    class _DummyVikingDB:
+        is_closing = False
+        has_queue_manager = False
+
+        async def upsert(self, _data, *, ctx):  # pragma: no cover
+            raise AssertionError("upsert must not be called")
+
+    embedder = _DummyEmbedder()
+    monkeypatch.setattr(
+        "openviking_cli.utils.config.get_openviking_config",
+        lambda: _DummyConfig(embedder),
+    )
+
+    handler = TextEmbeddingHandler(_DummyVikingDB())
+    error_calls = []
+    handler.set_callbacks(
+        on_success=lambda: None,
+        on_error=lambda msg, data=None: error_calls.append(msg),
+    )
+
+    # Message dict WITHOUT "data" key
+    bad_payload = {"id": "msg-bad", "message": "orphaned field"}
+    result = await handler.on_dequeue(bad_payload)
+
+    assert result is None
+    assert len(error_calls) == 1, "report_error must be called for malformed message"
+    assert embedder.calls == 0, "embedder must not be called for malformed message"
+
+
+@pytest.mark.asyncio
+async def test_embedding_handler_retries_transient_error(monkeypatch):
+    """ConnectionError on first 2 attempts must retry; message processed on 3rd."""
+    from unittest.mock import AsyncMock
+
+    attempt_counter = {"n": 0}
+
+    class _FlakyEmbedder:
+        def embed(self, text: str):
+            attempt_counter["n"] += 1
+            if attempt_counter["n"] <= 2:
+                raise ConnectionError("connection refused")
+            from openviking.models.embedder.base import EmbedResult
+
+            return EmbedResult(dense_vector=[0.1, 0.2])
+
+    class _RetryVikingDB:
+        is_closing = False
+        has_queue_manager = False
+        upsert_calls = 0
+
+        async def upsert(self, _data, *, ctx):
+            self.upsert_calls += 1
+
+    monkeypatch.setattr(
+        "openviking_cli.utils.config.get_openviking_config",
+        lambda: _DummyConfig(_FlakyEmbedder()),
+    )
+    monkeypatch.setattr(
+        "openviking.storage.collection_schemas.asyncio.sleep",
+        AsyncMock(),
+    )
+
+    vikingdb = _RetryVikingDB()
+    handler = TextEmbeddingHandler(vikingdb)
+    success_calls = []
+    error_calls = []
+    handler.set_callbacks(
+        on_success=lambda: success_calls.append(1),
+        on_error=lambda msg, data=None: error_calls.append(msg),
+    )
+
+    await handler.on_dequeue(_build_queue_payload())
+
+    assert attempt_counter["n"] == 3, f"expected 3 embed calls, got {attempt_counter['n']}"
+    assert len(error_calls) == 0, "no error must be recorded when retry eventually succeeds"
+    assert len(success_calls) == 1
+    assert vikingdb.upsert_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_embedding_handler_exhausted_retries_records_error(monkeypatch):
+    """After 3 consecutive ConnectionErrors the message must be dropped with an error record."""
+    from unittest.mock import AsyncMock
+
+    class _AlwaysFailEmbedder:
+        def embed(self, text: str):
+            raise ConnectionError("connection refused")
+
+    class _DownVikingDB:
+        is_closing = False
+        has_queue_manager = False
+
+        async def upsert(self, _data, *, ctx):  # pragma: no cover
+            raise AssertionError("upsert must not be called")
+
+    monkeypatch.setattr(
+        "openviking_cli.utils.config.get_openviking_config",
+        lambda: _DummyConfig(_AlwaysFailEmbedder()),
+    )
+    monkeypatch.setattr(
+        "openviking.storage.collection_schemas.asyncio.sleep",
+        AsyncMock(),
+    )
+
+    handler = TextEmbeddingHandler(_DownVikingDB())
+    error_calls = []
+    handler.set_callbacks(
+        on_success=lambda: None,
+        on_error=lambda msg, data=None: error_calls.append(msg),
+    )
+
+    result = await handler.on_dequeue(_build_queue_payload())
+
+    assert result is None
+    assert len(error_calls) == 1, "report_error must be called after retries exhausted"
