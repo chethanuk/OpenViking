@@ -515,6 +515,73 @@ class SemanticConfig:
     memory_chunk_overlap: int = 200
     """Character overlap between adjacent memory chunks for context continuity."""
 
+    # --- Custom prompt template fields (#578) ---
+
+    document_summary_prompt: Optional[str] = None
+    """Custom Jinja2 template for documentation file summaries.
+    Required variables: {{ file_name }}, {{ content }}.
+    Output must be plain text (no markdown).
+    When None, the built-in semantic.document_summary template is used."""
+
+    code_summary_prompt: Optional[str] = None
+    """Custom Jinja2 template for code file summaries.
+    Required variables: {{ file_name }}, {{ content }}.
+    In ast_llm mode, {{ content }} receives the AST skeleton text (not raw source).
+    Output must be plain text (no markdown).
+    When None, the built-in semantic.code_summary / semantic.code_ast_summary template is used."""
+
+    file_summary_prompt: Optional[str] = None
+    """Custom Jinja2 template for generic file summaries (non-code, non-doc).
+    Required variables: {{ file_name }}, {{ content }}.
+    Output must be plain text (no markdown).
+    When None, the built-in semantic.file_summary template is used."""
+
+    overview_prompt: Optional[str] = None
+    """Custom Jinja2 template for directory overview generation.
+    Required variables: {{ dir_name }}, {{ file_summaries }}, {{ children_abstracts }}.
+    Output must be Markdown with H1 title followed by a plain-text description paragraph.
+    When None, the built-in semantic.overview_generation template is used."""
+
+    def __post_init__(self) -> None:
+        self._validate_prompt_templates()
+
+    def _validate_prompt_templates(self) -> None:
+        """Validate any non-None custom prompt template at config load time."""
+        import jinja2
+        import jinja2.meta
+
+        _REQUIRED_VARS: Dict[str, set] = {
+            "document_summary_prompt": {"file_name", "content"},
+            "code_summary_prompt": {
+                "file_name",
+                "content",
+            },  # content = skeleton_text in ast_llm mode
+            "file_summary_prompt": {"file_name", "content"},
+            "overview_prompt": {"dir_name", "file_summaries", "children_abstracts"},
+        }
+
+        env = jinja2.Environment()
+        for field_name, required in _REQUIRED_VARS.items():
+            raw: Optional[str] = getattr(self, field_name)
+            if raw is None:
+                continue
+            # Phase 1: syntax check
+            try:
+                ast = env.parse(raw)
+            except jinja2.exceptions.TemplateSyntaxError as e:
+                raise ValueError(
+                    f"semantic.{field_name}: Jinja2 syntax error at line {e.lineno}: {e.message}"
+                ) from e
+            # Phase 2: required variable presence check
+            declared = jinja2.meta.find_undeclared_variables(ast)
+            missing = required - declared
+            if missing:
+                raise ValueError(
+                    f"semantic.{field_name}: missing required variable(s) {sorted(missing)}. "
+                    f"Template must reference all of: {sorted(required)}. "
+                    f"Found variables: {sorted(declared)}."
+                )
+
 
 # Configuration registry for dynamic loading
 PARSER_CONFIG_REGISTRY = {

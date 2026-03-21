@@ -616,6 +616,19 @@ class SemanticProcessor(DequeueHandlerBase):
             results.append({"name": dir_name, "abstract": abstract})
         return results
 
+    @staticmethod
+    def _render_custom_or_builtin(
+        custom_template: Optional[str],
+        builtin_id: str,
+        variables: dict,
+    ) -> str:
+        """Render custom Jinja2 template if set, else delegate to built-in render_prompt."""
+        if custom_template:
+            import jinja2
+
+            return jinja2.Template(custom_template).render(**variables)
+        return render_prompt(builtin_id, variables)
+
     async def _generate_text_summary(
         self,
         file_path: str,
@@ -665,9 +678,11 @@ class SemanticProcessor(DequeueHandlerBase):
                     if code_mode == "ast":
                         return {"name": file_name, "summary": skeleton_text}
                     else:  # ast_llm
-                        prompt = render_prompt(
+                        # NOTE: pass content=skeleton_text so user's {{ content }} template works in both llm and ast_llm modes
+                        prompt = self._render_custom_or_builtin(
+                            get_openviking_config().semantic.code_summary_prompt,
                             "semantic.code_ast_summary",
-                            {"file_name": file_name, "skeleton": skeleton_text},
+                            {"file_name": file_name, "content": skeleton_text},
                         )
                         async with llm_sem:
                             summary = await vlm.get_completion_async(prompt)
@@ -678,7 +693,8 @@ class SemanticProcessor(DequeueHandlerBase):
                     logger.info("AST empty skeleton, fallback to LLM: %s", file_path)
 
             # "llm" mode or fallback when skeleton is None/empty
-            prompt = render_prompt(
+            prompt = self._render_custom_or_builtin(
+                get_openviking_config().semantic.code_summary_prompt,
                 "semantic.code_summary",
                 {"file_name": file_name, "content": content},
             )
@@ -691,7 +707,14 @@ class SemanticProcessor(DequeueHandlerBase):
         else:
             prompt_id = "semantic.file_summary"
 
-        prompt = render_prompt(
+        semantic = get_openviking_config().semantic
+        custom = (
+            semantic.document_summary_prompt
+            if prompt_id == "semantic.document_summary"
+            else semantic.file_summary_prompt
+        )
+        prompt = self._render_custom_or_builtin(
+            custom,
             prompt_id,
             {"file_name": file_name, "content": content},
         )
@@ -900,6 +923,15 @@ class SemanticProcessor(DequeueHandlerBase):
                 file_index_map,
             )
 
+        # Warn if overview has no parseable abstract — common when custom template omits
+        # the required H1-title + plain-text-paragraph structure
+        if not self._extract_abstract_from_overview(overview):
+            logger.warning(
+                "Generated overview for '%s' produced an empty abstract. "
+                "If using a custom overview_prompt, ensure your template produces "
+                "an H1 title followed by a plain-text paragraph.",
+                dir_uri,
+            )
         return overview
 
     async def _single_generate_overview(
@@ -915,13 +947,15 @@ class SemanticProcessor(DequeueHandlerBase):
         vlm = get_openviking_config().vlm
 
         try:
-            prompt = render_prompt(
+            vars_ = {
+                "dir_name": dir_uri.split("/")[-1],
+                "file_summaries": file_summaries_str,
+                "children_abstracts": children_abstracts_str,
+            }
+            prompt = self._render_custom_or_builtin(
+                get_openviking_config().semantic.overview_prompt,
                 "semantic.overview_generation",
-                {
-                    "dir_name": dir_uri.split("/")[-1],
-                    "file_summaries": file_summaries_str,
-                    "children_abstracts": children_abstracts_str,
-                },
+                vars_,
             )
 
             overview = await vlm.get_completion_async(prompt)
@@ -992,7 +1026,8 @@ class SemanticProcessor(DequeueHandlerBase):
             children_str = children_abstracts_str if batch_idx == 0 else "None"
 
             try:
-                prompt = render_prompt(
+                prompt = self._render_custom_or_builtin(
+                    get_openviking_config().semantic.overview_prompt,
                     "semantic.overview_generation",
                     {
                         "dir_name": dir_name,
@@ -1028,7 +1063,8 @@ class SemanticProcessor(DequeueHandlerBase):
         # Merge partials into a final overview (include children for context)
         combined = "\n\n---\n\n".join(partial_overviews)
         try:
-            prompt = render_prompt(
+            prompt = self._render_custom_or_builtin(
+                get_openviking_config().semantic.overview_prompt,
                 "semantic.overview_generation",
                 {
                     "dir_name": dir_name,
