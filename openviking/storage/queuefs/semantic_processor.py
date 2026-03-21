@@ -923,6 +923,15 @@ class SemanticProcessor(DequeueHandlerBase):
                 file_index_map,
             )
 
+        # Warn if overview has no parseable abstract — common when custom template omits
+        # the required H1-title + plain-text-paragraph structure
+        if not self._extract_abstract_from_overview(overview):
+            logger.warning(
+                "Generated overview for '%s' produced an empty abstract. "
+                "If using a custom overview_prompt, ensure your template produces "
+                "an H1 title followed by a plain-text paragraph.",
+                dir_uri,
+            )
         return overview
 
     async def _single_generate_overview(
@@ -938,13 +947,15 @@ class SemanticProcessor(DequeueHandlerBase):
         vlm = get_openviking_config().vlm
 
         try:
-            prompt = render_prompt(
+            vars_ = {
+                "dir_name": dir_uri.split("/")[-1],
+                "file_summaries": file_summaries_str,
+                "children_abstracts": children_abstracts_str,
+            }
+            prompt = self._render_custom_or_builtin(
+                get_openviking_config().semantic.overview_prompt,
                 "semantic.overview_generation",
-                {
-                    "dir_name": dir_uri.split("/")[-1],
-                    "file_summaries": file_summaries_str,
-                    "children_abstracts": children_abstracts_str,
-                },
+                vars_,
             )
 
             overview = await vlm.get_completion_async(prompt)
@@ -1015,7 +1026,8 @@ class SemanticProcessor(DequeueHandlerBase):
             children_str = children_abstracts_str if batch_idx == 0 else "None"
 
             try:
-                prompt = render_prompt(
+                prompt = self._render_custom_or_builtin(
+                    get_openviking_config().semantic.overview_prompt,
                     "semantic.overview_generation",
                     {
                         "dir_name": dir_name,
@@ -1051,7 +1063,8 @@ class SemanticProcessor(DequeueHandlerBase):
         # Merge partials into a final overview (include children for context)
         combined = "\n\n---\n\n".join(partial_overviews)
         try:
-            prompt = render_prompt(
+            prompt = self._render_custom_or_builtin(
+                get_openviking_config().semantic.overview_prompt,
                 "semantic.overview_generation",
                 {
                     "dir_name": dir_name,
