@@ -616,6 +616,19 @@ class SemanticProcessor(DequeueHandlerBase):
             results.append({"name": dir_name, "abstract": abstract})
         return results
 
+    @staticmethod
+    def _render_custom_or_builtin(
+        custom_template: Optional[str],
+        builtin_id: str,
+        variables: dict,
+    ) -> str:
+        """Render custom Jinja2 template if set, else delegate to built-in render_prompt."""
+        if custom_template:
+            import jinja2
+
+            return jinja2.Template(custom_template).render(**variables)
+        return render_prompt(builtin_id, variables)
+
     async def _generate_text_summary(
         self,
         file_path: str,
@@ -665,9 +678,11 @@ class SemanticProcessor(DequeueHandlerBase):
                     if code_mode == "ast":
                         return {"name": file_name, "summary": skeleton_text}
                     else:  # ast_llm
-                        prompt = render_prompt(
+                        # NOTE: pass content=skeleton_text so user's {{ content }} template works in both llm and ast_llm modes
+                        prompt = self._render_custom_or_builtin(
+                            get_openviking_config().semantic.code_summary_prompt,
                             "semantic.code_ast_summary",
-                            {"file_name": file_name, "skeleton": skeleton_text},
+                            {"file_name": file_name, "content": skeleton_text},
                         )
                         async with llm_sem:
                             summary = await vlm.get_completion_async(prompt)
@@ -678,7 +693,8 @@ class SemanticProcessor(DequeueHandlerBase):
                     logger.info("AST empty skeleton, fallback to LLM: %s", file_path)
 
             # "llm" mode or fallback when skeleton is None/empty
-            prompt = render_prompt(
+            prompt = self._render_custom_or_builtin(
+                get_openviking_config().semantic.code_summary_prompt,
                 "semantic.code_summary",
                 {"file_name": file_name, "content": content},
             )
@@ -691,7 +707,14 @@ class SemanticProcessor(DequeueHandlerBase):
         else:
             prompt_id = "semantic.file_summary"
 
-        prompt = render_prompt(
+        semantic = get_openviking_config().semantic
+        custom = (
+            semantic.document_summary_prompt
+            if prompt_id == "semantic.document_summary"
+            else semantic.file_summary_prompt
+        )
+        prompt = self._render_custom_or_builtin(
+            custom,
             prompt_id,
             {"file_name": file_name, "content": content},
         )
