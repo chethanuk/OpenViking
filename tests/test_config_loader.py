@@ -105,7 +105,10 @@ class TestRequireConfig:
 
     def test_raises_on_missing(self, monkeypatch):
         monkeypatch.delenv("TEST_MISSING_ENV", raising=False)
-        with pytest.raises(FileNotFoundError, match="configuration file not found"):
+        with pytest.raises(
+            FileNotFoundError,
+            match=r"(?s)configuration file not found.*https://openviking\.ai/docs",
+        ):
             require_config(None, "TEST_MISSING_ENV", "nonexistent_file.conf", "test")
 
 
@@ -199,6 +202,7 @@ def test_load_server_config_missing_message_uses_openviking_ai_docs(tmp_path, mo
     monkeypatch.delenv("OPENVIKING_CONFIG_FILE", raising=False)
     monkeypatch.setattr(server_config, "DEFAULT_CONFIG_DIR", tmp_path / "user")
     monkeypatch.setattr(server_config, "SYSTEM_CONFIG_DIR", tmp_path / "system")
+    monkeypatch.setattr(server_config, "resolve_config_path", lambda *args, **kwargs: None)
 
     with pytest.raises(FileNotFoundError, match=r"https://openviking\.ai/docs"):
         server_config.load_server_config()
@@ -211,6 +215,7 @@ def test_openviking_config_singleton_missing_message_uses_openviking_ai_docs(tmp
     monkeypatch.delenv("OPENVIKING_CONFIG_FILE", raising=False)
     monkeypatch.setattr(config_module, "DEFAULT_CONFIG_DIR", tmp_path / "user")
     monkeypatch.setattr(config_module, "SYSTEM_CONFIG_DIR", tmp_path / "system")
+    monkeypatch.setattr(config_module, "resolve_config_path", lambda *args, **kwargs: None)
 
     OpenVikingConfigSingleton.reset_instance()
     try:
@@ -220,13 +225,16 @@ def test_openviking_config_singleton_missing_message_uses_openviking_ai_docs(tmp
         OpenVikingConfigSingleton.reset_instance()
 
 
-def test_openviking_config_singleton_initialize_missing_message_uses_openviking_ai_docs(tmp_path, monkeypatch):
+def test_openviking_config_singleton_initialize_missing_message_uses_openviking_ai_docs(
+    tmp_path, monkeypatch
+):
     import openviking_cli.utils.config.open_viking_config as config_module
     from openviking_cli.utils.config.open_viking_config import OpenVikingConfigSingleton
 
     monkeypatch.delenv("OPENVIKING_CONFIG_FILE", raising=False)
     monkeypatch.setattr(config_module, "DEFAULT_CONFIG_DIR", tmp_path / "user")
     monkeypatch.setattr(config_module, "SYSTEM_CONFIG_DIR", tmp_path / "system")
+    monkeypatch.setattr(config_module, "resolve_config_path", lambda *args, **kwargs: None)
 
     OpenVikingConfigSingleton.reset_instance()
     try:
