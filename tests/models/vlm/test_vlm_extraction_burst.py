@@ -23,7 +23,15 @@ drives the session layer to write ``.failed.json``; zero raised errors == zero
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+
 from openviking.models.vlm.backends.openai_vlm import OpenAIVLM
+from openviking.models.vlm.backends.volcengine_vlm import VolcEngineVLM
+
+# Every async backend routes its completion calls through the same
+# VLMBase._run_with_vlm_async_retry / shared semaphore. Cover the two that
+# override get_completion_async so the fix is exercised on each real path.
+BACKENDS = [OpenAIVLM, VolcEngineVLM]
 
 
 def _make_response(content: str = "ok"):
@@ -62,8 +70,8 @@ class _ProviderStub:
             self.in_flight -= 1
 
 
-def _make_vlm(max_concurrent: int, stub: _ProviderStub, max_retries: int = 0) -> OpenAIVLM:
-    vlm = OpenAIVLM(
+def _make_vlm(max_concurrent: int, stub: _ProviderStub, max_retries: int = 0, cls=OpenAIVLM):
+    vlm = cls(
         {
             "provider": "openai",
             "model": "gpt-4o-mini",
@@ -96,13 +104,14 @@ async def _fan_out(vlm: OpenAIVLM, n: int):
     return await asyncio.gather(*tasks, return_exceptions=True)
 
 
-async def test_multi_session_extraction_no_429_silent_loss():
+@pytest.mark.parametrize("cls", BACKENDS)
+async def test_multi_session_extraction_no_429_silent_loss(cls):
     """Row 10 (repro): limiter sized to the provider's real limit prevents the
     burst, so the 12 concurrent extraction calls all succeed — no error is
     raised, i.e. zero ``.failed.json`` and no silent memory loss."""
     provider_limit = 2
     stub = _ProviderStub(threshold=provider_limit)
-    vlm = _make_vlm(max_concurrent=provider_limit, stub=stub)
+    vlm = _make_vlm(max_concurrent=provider_limit, stub=stub, cls=cls)
 
     results = await _fan_out(vlm, TOTAL_CALLS)
 
@@ -113,7 +122,8 @@ async def test_multi_session_extraction_no_429_silent_loss():
     assert all(r == "ok" for r in results)
 
 
-async def test_multi_session_429_without_limiter_control():
+@pytest.mark.parametrize("cls", BACKENDS)
+async def test_multi_session_429_without_limiter_control(cls):
     """Row 11 (control): with the limiter effectively disabled (budget >> load),
     all 12 calls fire at once, exceed the provider's limit, and 429s propagate as
     failures — this is the path that writes ``.failed.json``. Proves the repro is
@@ -121,7 +131,7 @@ async def test_multi_session_429_without_limiter_control():
     provider_limit = 2
     stub = _ProviderStub(threshold=provider_limit)
     # Budget far above the load == no effective concurrency cap.
-    vlm = _make_vlm(max_concurrent=1000, stub=stub)
+    vlm = _make_vlm(max_concurrent=1000, stub=stub, cls=cls)
 
     results = await _fan_out(vlm, TOTAL_CALLS)
 

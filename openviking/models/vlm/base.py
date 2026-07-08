@@ -308,11 +308,8 @@ class VLMBase(ABC):
         """Acquire VLM semaphore then delegate to retry_async (mirrors embedder)."""
         async def _wrapped() -> T:
             semaphore = _get_async_vlm_semaphore(self.max_concurrent)
-            await semaphore.acquire()
-            try:
+            async with semaphore:
                 return await func()
-            finally:
-                semaphore.release()
 
         from openviking.utils.model_retry import retry_async
         return await retry_async(
