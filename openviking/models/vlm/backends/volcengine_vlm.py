@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, Union
 from openviking.telemetry import tracer
 from openviking_cli.utils import get_logger
 
-from ..base import ToolCall, VLMResponse
+from ..base import ToolCall, VLMResponse, _get_async_vlm_semaphore
 from .openai_vlm import OpenAIVLM
 
 logger = get_logger(__name__)
@@ -180,29 +180,31 @@ class VolcEngineVLM(OpenAIVLM):
 
         client = self.get_async_client()
 
-        last_error = None
-        for attempt in range(self.max_retries + 1):
-            try:
-                t0 = time.perf_counter()
-                response = await client.chat.completions.create(**kwargs)
-                elapsed = time.perf_counter() - t0
-                self._update_token_usage_from_response(response, duration_seconds=elapsed)
-                result = self._build_vlm_response(response, has_tools=bool(tools))
-                if tools:
-                    return result
-                content = self._clean_response(str(result))
-                if content:
-                    tracer.info(f"message.content={content}")
-                return content
-            except Exception as e:
-                last_error = e
-                if attempt < self.max_retries:
-                    await asyncio.sleep(2**attempt)
+        # Gate the hand-rolled retry loop with the shared VLM semaphore (issue #3008)
+        async with _get_async_vlm_semaphore(self.max_concurrent):
+            last_error = None
+            for attempt in range(self.max_retries + 1):
+                try:
+                    t0 = time.perf_counter()
+                    response = await client.chat.completions.create(**kwargs)
+                    elapsed = time.perf_counter() - t0
+                    self._update_token_usage_from_response(response, duration_seconds=elapsed)
+                    result = self._build_vlm_response(response, has_tools=bool(tools))
+                    if tools:
+                        return result
+                    content = self._clean_response(str(result))
+                    if content:
+                        tracer.info(f"message.content={content}")
+                    return content
+                except Exception as e:
+                    last_error = e
+                    if attempt < self.max_retries:
+                        await asyncio.sleep(2**attempt)
 
-        if last_error:
-            raise last_error
-        else:
-            raise RuntimeError("Unknown error in async completion")
+            if last_error:
+                raise last_error
+            else:
+                raise RuntimeError("Unknown error in async completion")
 
     def _detect_image_format(self, data: bytes) -> str:
         """Detect image format from magic bytes.
@@ -397,11 +399,13 @@ class VolcEngineVLM(OpenAIVLM):
             kwargs["tool_choice"] = tool_choice or "auto"
 
         client = self.get_async_client()
-        t0 = time.perf_counter()
-        response = await client.chat.completions.create(**kwargs)
-        elapsed = time.perf_counter() - t0
-        self._update_token_usage_from_response(response, duration_seconds=elapsed)
-        result = self._build_vlm_response(response, has_tools=bool(tools))
-        if tools:
-            return result
-        return self._clean_response(str(result))
+        # Gate the async vision call with the shared VLM semaphore (issue #3008)
+        async with _get_async_vlm_semaphore(self.max_concurrent):
+            t0 = time.perf_counter()
+            response = await client.chat.completions.create(**kwargs)
+            elapsed = time.perf_counter() - t0
+            self._update_token_usage_from_response(response, duration_seconds=elapsed)
+            result = self._build_vlm_response(response, has_tools=bool(tools))
+            if tools:
+                return result
+            return self._clean_response(str(result))

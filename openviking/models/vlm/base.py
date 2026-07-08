@@ -5,6 +5,7 @@
 import asyncio
 import logging
 import re
+import weakref
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,18 +26,15 @@ _THINK_TAG_RE = re.compile(r"<think>[\s\S]*?</think>")
 logger = get_logger(__name__)
 
 # Per-event-loop async semaphore cache for VLM (mirrors embedder/base.py:36-49)
-
-
-_ASYNC_VLM_SEMAPHORES: dict = {}
+_ASYNC_VLM_SEMAPHORES: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, Dict[int, asyncio.Semaphore]]" = weakref.WeakKeyDictionary()
 _ASYNC_VLM_LOCK = Lock()
 
 
 def _get_async_vlm_semaphore(limit: int) -> asyncio.Semaphore:
     loop = asyncio.get_running_loop()
     normalized_limit = max(1, limit)
-    key = id(loop)
     with _ASYNC_VLM_LOCK:
-        semaphores_by_limit = _ASYNC_VLM_SEMAPHORES.setdefault(key, {})
+        semaphores_by_limit = _ASYNC_VLM_SEMAPHORES.setdefault(loop, {})
         semaphore = semaphores_by_limit.get(normalized_limit)
         if semaphore is None:
             semaphore = asyncio.Semaphore(normalized_limit)

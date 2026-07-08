@@ -16,7 +16,7 @@ import litellm
 from litellm import acompletion, completion
 
 from openviking.telemetry import tracer
-from openviking.utils.model_retry import retry_async, retry_sync
+from openviking.utils.model_retry import retry_sync
 from openviking_cli.utils import get_logger
 
 from ..base import ToolCall, VLMBase, VLMResponse
@@ -457,9 +457,8 @@ class LiteLLMVLMProvider(VLMBase):
                 return self._build_vlm_response(response, has_tools=True)
             return self._clean_response(self._extract_content_from_response(response))
 
-        return await retry_async(
+        return await self._run_with_vlm_async_retry(
             _call,
-            max_retries=self.max_retries,
             logger=logger,
             operation_name="LiteLLM VLM async completion",
         )
@@ -513,9 +512,8 @@ class LiteLLMVLMProvider(VLMBase):
                 return self._build_vlm_response(response, has_tools=True)
             return self._clean_response(self._extract_content_from_response(response))
 
-        return await retry_async(
+        return await self._run_with_vlm_async_retry(
             _call,
-            max_retries=self.max_retries,
             logger=logger,
             operation_name="LiteLLM VLM async vision completion",
         )
