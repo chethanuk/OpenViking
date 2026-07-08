@@ -18,7 +18,7 @@ try:
 except ImportError:
     openai = None
 
-from openviking.utils.model_retry import retry_async, retry_sync
+from openviking.utils.model_retry import retry_sync
 
 from ..base import ToolCall, VLMBase, VLMResponse
 from ..registry import DEFAULT_AZURE_API_VERSION
