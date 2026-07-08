@@ -54,13 +54,19 @@ async def test_semaphore_respects_limit(limit, expected_max_inflight):
     assert sem._value == limit  # internal but stable for test
 
 
+class _FakeLoop:
+    """A weakref-able stand-in for an event loop (plain object() is not)."""
+
+
 async def test_per_event_loop_isolation():
     """Row 2: different loops get independent semaphores."""
     # Primary loop semaphore
     sem1 = _get_async_vlm_semaphore(3)
-    # Simulate second loop by patching (real multi-loop rare in tests)
+    # Simulate second loop by patching (real multi-loop rare in tests).
+    # WeakKeyDictionary requires a weakly-referenceable key, so use a class
+    # instance rather than a bare object().
     with mock.patch("asyncio.get_running_loop") as mock_loop:
-        mock_loop.return_value = object()  # distinct object
+        mock_loop.return_value = _FakeLoop()  # distinct, weakref-able
         sem2 = _get_async_vlm_semaphore(3)
     assert sem1 is not sem2
 
@@ -165,3 +171,32 @@ async def test_concurrent_calls_are_gated_by_semaphore():
     await asyncio.gather(*tasks)
     assert counter.max_seen <= 2
     assert len(results) == 5
+
+
+async def test_shared_budget_across_distinct_backends():
+    """Row 2b: two DISTINCT VLM instances on the same loop draw from ONE
+    process-wide semaphore budget (semantic queue vs extraction vs parser each
+    hold their own VLM object). This is the load-bearing correctness property of
+    the module-level per-loop design."""
+    limit = 2
+    vlm_a = DummyVLM({"provider": "openai", "model": "m", "max_concurrent": limit})
+    vlm_b = DummyVLM({"provider": "openai", "model": "m", "max_concurrent": limit})
+    assert vlm_a is not vlm_b
+    counter = _InFlightCounter()
+
+    async def slow_call():
+        async with counter:
+            await asyncio.sleep(0.03)
+            return "ok"
+
+    # 6 calls from each distinct instance, all concurrent, one shared budget.
+    tasks = [
+        asyncio.create_task(vlm_a._run_with_vlm_async_retry(lambda: slow_call()))
+        for _ in range(6)
+    ] + [
+        asyncio.create_task(vlm_b._run_with_vlm_async_retry(lambda: slow_call()))
+        for _ in range(6)
+    ]
+    await asyncio.gather(*tasks)
+    # Combined peak must not exceed the single shared limit despite 2 instances.
+    assert counter.max_seen <= limit
