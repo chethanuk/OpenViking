@@ -551,6 +551,7 @@ class VLMConfig(BaseModel):
             "thinking": self.thinking,
             "max_tokens": self.max_tokens,
             "stream": credential.stream if credential.stream is not None else self.stream,
+            "max_concurrent": self.max_concurrent,
             "api_version": credential.api_version,
         }
 
@@ -585,6 +586,7 @@ class VLMConfig(BaseModel):
             "thinking": self.thinking,
             "max_tokens": self.max_tokens,
             "stream": stream,
+            "max_concurrent": self.max_concurrent,
             "api_version": self.api_version,
         }
 
