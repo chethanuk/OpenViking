@@ -2,12 +2,15 @@
 # SPDX-License-Identifier: AGPL-3.0
 """VLM base interface and abstract classes"""
 
+import asyncio
 import logging
 import re
+import weakref
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from threading import Lock
+from typing import Any, Awaitable, Callable, Dict, List, Optional, TypeVar, Union
 
 from openviking.utils.exceptions import AllCredentialsFailedError
 from openviking.utils.model_retry import (
@@ -21,6 +24,25 @@ from .token_usage import TokenUsageTracker
 
 _THINK_TAG_RE = re.compile(r"<think>[\s\S]*?</think>")
 logger = get_logger(__name__)
+
+# Per-event-loop async semaphore cache for VLM (mirrors embedder/base.py:36-49)
+_ASYNC_VLM_SEMAPHORES: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, Dict[int, asyncio.Semaphore]]" = weakref.WeakKeyDictionary()
+_ASYNC_VLM_LOCK = Lock()
+
+
+def _get_async_vlm_semaphore(limit: int) -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()
+    normalized_limit = max(1, limit)
+    with _ASYNC_VLM_LOCK:
+        semaphores_by_limit = _ASYNC_VLM_SEMAPHORES.setdefault(loop, {})
+        semaphore = semaphores_by_limit.get(normalized_limit)
+        if semaphore is None:
+            semaphore = asyncio.Semaphore(normalized_limit)
+            semaphores_by_limit[normalized_limit] = semaphore
+        return semaphore
+
+
+T = TypeVar("T")
 
 
 @dataclass
@@ -67,6 +89,7 @@ class VLMBase(ABC):
         self.api_base = config.get("api_base")
         self.temperature = config.get("temperature", 0.0)
         self.max_retries = config.get("max_retries", 3)
+        self.max_concurrent = int(config.get("max_concurrent", 64))
         self.timeout = config.get("timeout", 600.0)
         self.max_tokens = config.get("max_tokens")
         self.extra_headers = config.get("extra_headers")
@@ -239,7 +262,6 @@ class VLMBase(ABC):
             from openviking.observability.context import get_root_observability_context
 
             root_context = get_root_observability_context()
-
             VLMEventDataSource.record_call(
                 provider=str(provider),
                 model_name=str(model_name),
@@ -276,6 +298,27 @@ class VLMBase(ABC):
         """Reset token usage"""
         self._token_tracker.reset()
 
+    async def _run_with_vlm_async_retry(
+        self,
+        func: Callable[[], Awaitable[T]],
+        *,
+        logger=None,
+        operation_name: str = "vlm_call",
+    ) -> T:
+        """Acquire VLM semaphore then delegate to retry_async (mirrors embedder)."""
+        async def _wrapped() -> T:
+            semaphore = _get_async_vlm_semaphore(self.max_concurrent)
+            async with semaphore:
+                return await func()
+
+        from openviking.utils.model_retry import retry_async
+        return await retry_async(
+            _wrapped,
+            max_retries=self.max_retries,
+            logger=logger,
+            operation_name=operation_name,
+        )
+
     def _extract_content_from_response(self, response) -> str:
         if isinstance(response, str):
             return response
@@ -305,27 +348,22 @@ class VLMFactory:
             from .backends.volcengine_vlm import VolcEngineVLM
 
             return VolcEngineVLM(config)
-
         elif provider in ("openai", "azure"):
             from .backends.openai_vlm import OpenAIVLM
 
             return OpenAIVLM(config)
-
         elif provider == "openai-codex":
             from .backends.codex_vlm import CodexVLM
 
             return CodexVLM(config)
-
         elif provider == "kimi":
             from .backends.kimi_vlm import KimiVLM
 
             return KimiVLM(config)
-
         elif provider == "glm":
             from .backends.glm_vlm import GLMVLM
 
             return GLMVLM(config)
-
         else:
             from .backends.litellm_vlm import LiteLLMVLMProvider
 
@@ -718,7 +756,6 @@ class MultiCredentialVLM(VLMBase):
             AllCredentialsFailedError if all credentials fail
         """
         aggregated_errors = []
-
         # See the sync variant for the ring-traversal rationale.
         start = self._switcher.maybe_failback()
         n = self._switcher.n
@@ -844,7 +881,6 @@ class MultiCredentialVLM(VLMBase):
 
         if not self._vlm_instances:
             return {}
-
         merged_tracker = self._vlm_instances[0].token_tracker
         for instance in self._vlm_instances[1:]:
             merged_tracker = TokenUsageTracker.merge(merged_tracker, instance.token_tracker)

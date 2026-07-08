@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: AGPL-3.0
 """VolcEngine VLM backend implementation."""
 
-import asyncio
 import base64
 import json
 import time
@@ -180,29 +179,27 @@ class VolcEngineVLM(OpenAIVLM):
 
         client = self.get_async_client()
 
-        last_error = None
-        for attempt in range(self.max_retries + 1):
-            try:
-                t0 = time.perf_counter()
-                response = await client.chat.completions.create(**kwargs)
-                elapsed = time.perf_counter() - t0
-                self._update_token_usage_from_response(response, duration_seconds=elapsed)
-                result = self._build_vlm_response(response, has_tools=bool(tools))
-                if tools:
-                    return result
-                content = self._clean_response(str(result))
-                if content:
-                    tracer.info(f"message.content={content}")
-                return content
-            except Exception as e:
-                last_error = e
-                if attempt < self.max_retries:
-                    await asyncio.sleep(2**attempt)
+        # Share the one VLM semaphore budget and release it during retry backoff
+        # by routing through the base helper (issue #3008), matching the OpenAI
+        # and LiteLLM backends.
+        async def _call() -> Union[str, VLMResponse]:
+            t0 = time.perf_counter()
+            response = await client.chat.completions.create(**kwargs)
+            elapsed = time.perf_counter() - t0
+            self._update_token_usage_from_response(response, duration_seconds=elapsed)
+            result = self._build_vlm_response(response, has_tools=bool(tools))
+            if tools:
+                return result
+            content = self._clean_response(str(result))
+            if content:
+                tracer.info(f"message.content={content}")
+            return content
 
-        if last_error:
-            raise last_error
-        else:
-            raise RuntimeError("Unknown error in async completion")
+        return await self._run_with_vlm_async_retry(
+            _call,
+            logger=logger,
+            operation_name="VolcEngine VLM async completion",
+        )
 
     def _detect_image_format(self, data: bytes) -> str:
         """Detect image format from magic bytes.
@@ -397,11 +394,22 @@ class VolcEngineVLM(OpenAIVLM):
             kwargs["tool_choice"] = tool_choice or "auto"
 
         client = self.get_async_client()
-        t0 = time.perf_counter()
-        response = await client.chat.completions.create(**kwargs)
-        elapsed = time.perf_counter() - t0
-        self._update_token_usage_from_response(response, duration_seconds=elapsed)
-        result = self._build_vlm_response(response, has_tools=bool(tools))
-        if tools:
-            return result
-        return self._clean_response(str(result))
+
+        # Route through the base helper so the vision path shares the one VLM
+        # semaphore budget and the standard retry/backoff (issue #3008), matching
+        # the OpenAI and LiteLLM backends.
+        async def _call() -> Union[str, VLMResponse]:
+            t0 = time.perf_counter()
+            response = await client.chat.completions.create(**kwargs)
+            elapsed = time.perf_counter() - t0
+            self._update_token_usage_from_response(response, duration_seconds=elapsed)
+            result = self._build_vlm_response(response, has_tools=bool(tools))
+            if tools:
+                return result
+            return self._clean_response(str(result))
+
+        return await self._run_with_vlm_async_retry(
+            _call,
+            logger=logger,
+            operation_name="VolcEngine VLM async vision completion",
+        )
