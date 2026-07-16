@@ -1,15 +1,13 @@
 # Copyright (c) 2026 Beijing Volcano Engine Technology Co., Ltd.
 # SPDX-License-Identifier: AGPL-3.0
 import importlib
-import logging
 import sys
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Type
 
 from openviking.storage.vectordb.collection.result import AggregateResult, SearchResult
 from openviking.storage.vectordb.index.index import IIndex
-
-logger = logging.getLogger(__name__)
+from openviking_cli.utils.logger import default_logger as logger
 
 
 def load_collection_class(class_path: str) -> Type["ICollection"]:
