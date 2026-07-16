@@ -1,11 +1,13 @@
 # Copyright (c) 2026 Beijing Volcano Engine Technology Co., Ltd.
 # SPDX-License-Identifier: AGPL-3.0
 import importlib
+import sys
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Type
 
 from openviking.storage.vectordb.collection.result import AggregateResult, SearchResult
 from openviking.storage.vectordb.index.index import IIndex
+from openviking_cli.utils.logger import default_logger as logger
 
 
 def load_collection_class(class_path: str) -> Type["ICollection"]:
@@ -219,6 +221,9 @@ class Collection:
         Closes the collection connection and sets the reference to None to free resources.
         """
         if self.__collection:
+            if sys.is_finalizing():
+                return  # leaked collection; OS reclaims it, engine guards cover #3101.
+            logger.warning("Collection was not closed explicitly; closing in __del__.")
             self.__collection.close()
             self.__collection = None
 
