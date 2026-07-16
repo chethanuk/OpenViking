@@ -5,6 +5,7 @@ import json
 import os
 import random
 import shutil
+import sys
 import time
 from itertools import zip_longest
 from typing import Any, Dict, List, Optional
@@ -747,6 +748,8 @@ class LocalCollection(ICollection):
 
     def _register_index_manage_job(self):
         """Register scheduled task for index maintenance."""
+        if sys.is_finalizing():
+            return  # interpreter is going away; nothing to persist or reschedule (#3101).
         if not self.index_manage_job_id:
             self.index_manage_job_id = f"{time.time_ns()}_{self.collection_name}_index_manage"
         next_run_time = datetime.datetime.now() + datetime.timedelta(

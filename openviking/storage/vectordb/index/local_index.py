@@ -4,6 +4,7 @@ import json
 import math
 import os
 import shutil
+import sys
 import threading
 import time
 from pathlib import Path
@@ -703,6 +704,10 @@ class PersistentIndex(LocalIndex):
         This ensures data durability and proper resource cleanup.
         After close(), the index cannot be used for further operations.
         """
+        # Never call into the C++ engine during interpreter finalization (SEGV: issue #3101).
+        if sys.is_finalizing():
+            return
+
         # 1. Persist latest data first
         self.persist()
 
@@ -748,6 +753,10 @@ class PersistentIndex(LocalIndex):
             This operation is expensive and should not be called too frequently.
             The collection layer schedules periodic persistence.
         """
+        # Never call into the C++ engine during interpreter finalization (SEGV: issue #3101).
+        if sys.is_finalizing():
+            return 0
+
         if self.engine_proxy:
             newest_version = int(self.get_newest_version())
             update_ts = self.engine_proxy.get_update_ts()
